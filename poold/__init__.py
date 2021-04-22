@@ -1,4 +1,6 @@
-from .learners import DORM, DORMP, AdaHedgeD
+# from .learners import DORM, DORMP, AdaHedgeD
+from .learners import AdaHedgeD 
+from .run import run
 
 def create(learner, loss, T, model_list, partition, **kwargs):
     """
