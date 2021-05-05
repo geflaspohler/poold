@@ -4,24 +4,20 @@ import pandas as pd
 import copy
 import pdb 
 
-from collections import deque
-from functools import partial
-
 from poold.utils import tic, toc, printf
 
 class OnlineLearner(ABC):
     """ OnlineLearner abstract base class. """    
-    def __init__(self, loss, T, model_list, partition=None, **kwargs):
+    def __init__(self, model_list, partition=None, T=None, **kwargs):
         """Initialize online learner. 
         Args:
-            loss (OnlineLoss): an OnlineLoss object
-            T (int): > 0, algorithm duration
             model_list (list[str]): list of strings indicating 
                 expert model names
                 e.g., ["doy", "cfsv2"]
             partition (numpy.array): mask partitioning learners 
                 for different delay periods into separate simplicies,
                 e.g., np.array([1, 1, 2, 3, 3]) 
+            T (int): > 0, algorithm duration, optional
         """                
         self.t = 1 # current algorithm time
         self.T = T # algorithm horizon
@@ -30,132 +26,108 @@ class OnlineLearner(ABC):
         self.expert_models = model_list
         self.d = len(self.expert_models) # number of experts
 
-        # Initilize previous optimistic hint hint
-        self.hint_prev = np.zeros(self.d,)
-
-        # Initialize loss structure and set up function handles
-        self.loss_obj = loss 
-        self.loss = loss.loss
-        self.loss_experts = loss.loss_experts
-        self.loss_gradient = loss.loss_gradient
-
-        # Initialize partition of weight vector into separate simplicies
+        # Initialize partition of weight vector into simplices
         if partition is not None:
             self.partition = np.array(partition)
         else:
             self.partition = np.ones(len(self.expert_models),)
         self.partition_keys = list(set(self.partition))
 
-        # Create regret_loss partial, pre-populated with 
-        # partition information
-        self.loss_regret = partial(
-            loss_obj.loss_regret, 
-            self.partition, 
-            self.partition_keys)
-
-    def normalize_by_partition(self, w):
-        """ Normalize weight vector by partition.
-
-        Args:
-            w (np.array): weight vector 
-        """
-        for k in self.partition_keys:     
-            p_ind = (self.partition == k)                             
-            w[p_ind] = (w[p_ind]/ np.sum(w[p_ind]))
-
-        return w
-        
-    def min_and_normalize(self, theta, lam):
-        if np.isclose(self.lam, 0):
-            # Return uniform weights over maximizing values
-            w_i =  (theta == theta.min()) # get minimum index
-            w = np.zeros((self.d,))
-            w[w_i] = 1.0  / np.sum(w_i)
-        else:
-            # Return numerically stable softmin
-            minval = np.min(theta)
-            w =  np.exp((-theta + minval) / lam) 
-            w = w / np.sum(w, axis=None)
-
-        # Check computation 
-        if np.isnan(w).any():
-            raise ValueError(f"Update produced NaNs: {self.w}")
-        return w
-
-    def init_weight_vector(self):
-        """ Returns uniform initialization weight vector. """          
-        w =  np.ones(self.d) / self.d
-        w = self.normalize_by_partition(w)
-        return w
-    
-    def get_weights(self):
-        ''' Returns dictionary of expert model names and current weights '''
-        return dict(zip(self.expert_models, self.w))
-            
     @abstractmethod
-    def update(self, X, hint=None, X_fb=None, y_fb=None, 
-        w_fb=None, **kwargs): 
-        """ Update weight vector with feedback.
-        
+    def update(self, t_fb, g_fb, hist_fb):
+        """ Algorithm specific parameter updates.
+
         Args:
-            X (np.array): matrix of model predictions at time t, X_t
-            hint (np.array): hint vector at time t, h_t
-            X_fb (np.array): matrix of model predictions 
-                at feedback time, X_{t-D} 
-            y_fb (np.array): outcome at feedback time, y_{t-D} 
-            w_fb (np.array): learner play at feedback time, w_{t-D} 
+            t_fb (int): feedback time
+            g_fb (np.array): feedback loss gradient
+            hist_fb (dict): dictionary of play history 
         """
         pass
 
     @abstractmethod
-    def predict(self, X, hint=None, **kwargs): 
-        """ Make prediction using current weight vector.
-        
-        Args:
-            X (np.array): matrix of model predictions at time t, X_t
-            hint (np.array): hint vector at time t, h_t
-        """
-        pass
-
-    @abstractmethod
-    def log_params(self):
+    def get_learner_params(self):
         """ Returns current algorithm parameters as a dictionary. """
         pass
 
-    @abstractmethod
-    def reset_alg_params(self, T):
-        """ Resets algorithm parameters for new duration T. 
+    def play(self): 
+        """ Play current weight vector and update history."""
+        # Add to set missing feedback
+        self.outstanding.add(self.t)
+
+        # Get algorithm parameters
+        params = self.get_learner_params()
+
+        # Update play history 
+        self.play_history[self.t] = (
+            copy.copy(self.w), 
+            copy.copy(self.h), 
+            copy.copy(self.outstanding),
+            copy.copy(params))
+
+        # Update algorithm iteration 
+        self.t += 1
+
+        return self.w
+
+    def feedback(self, t_fb, loss_fb, hint=None): 
+        """ Update weight vector with received feedback
+        and any available hints.
         
         Args:
-            T (int): > 0, duration
+            t_fb (int): feedback for round t_fb
+            loss (dict): dictionary of the form:
+                {
+                    "fun" (callable, optional): function handle for 
+                        the loss as a function of play w
+                    "jac" (callable): function handle for the loss
+                        gradient as a function of play w
+                }
+                for loss at feedback time t_fb
+            hint (dict): dictionary of the form:
+                {
+                    "fun" (callable, optional): function handle for 
+                        the hint as a function of play w
+                    "g" (np.array, optional): pseudo-gradient vector.
+                        If provided, "jac" is ignored.
+                    "jac" (callable, optional): function handle for 
+                        the hint gradient as a function of play w
+                }
+                for the hint pseudoloss at time self.t 
         """
-        pass    
 
-class AdaHedgeD(OnlineLearner):
-    """
-    AdaHedgeD module implements delayed AdaHedge 
-    online learning algorithm.
-    """    
-    def __init__(self, loss, T, model_list, partition=None, 
-        reg="adahedged"):
-        """ Initializes online_expert 
+        # Get previous play 
+        w_fb = self.get_play(t_fb)
 
-        Args:
-           reg (str): regularization strategy [ "dub | "adahedged" ], 
-                for Delayed Upper bound or AdaHedgeD-style 
-                adaptive regularization
-        """                
-        # Base class constructor 
-        super().__init__(loss, T, model_list, partition)
+        # Get linearized loss at feedback time
+        g_fb = loss_fb['jac'](w_fb)  
+        self.gradient_history[t_fb] = copy.copy(g_fb)
 
-        # Check and store regulraization 
-        supported_reg = ["adahedged", "dub"]
-        if reg not in supported_reg:
-            raise ValueError(
-                f"Unsupported regularizer for AdaHedgeD {reg}.")
+        if hint is None:
+            # Default of zero optimistic hint
+            self.h = np.zeros((self.d,))
+        elif "g" in hint:
+            # Use pre-computed hint gradient
+            self.h = hint["g"]
+        else:
+            # Compute loss gradient at current self.w
+            self.h = hint['jac'](self.w)  
 
-        self.reg = reg
-        self.reset_alg_params(T)
+        # Get play history at time t_fb
+        hist_fb = self.get_history(t_fb)
+
+        # Algorithm specific parameter updates
+        self.update(t_fb, g_fb, hist_fb)
+
+        # Update history
+        self.outstanding.remove(t_fb)
+
+    def log_params(self):
+        # Update parameter logging 
+        params = {'t': self.t} + self.get_learner_params()
+        # Log model weights
+        for i in range(self.d):
+            params[f"model_{self.expert_models[i]}"] = float(self.w[i])
+        return params
 
     def reset_alg_params(self, T):
         """ Resets algorithm parameters for new duration T. 
@@ -167,99 +139,236 @@ class AdaHedgeD(OnlineLearner):
         self.t = 1 # current algorithm time
         self.T = T # algorithm duration 
 
-        # Initialize algorithm hyperparmeters
+        # Record keeping 
+        self.play_history = {} # history of past plays
+        self.gradient_history = {} # history of loss gradients
+        self.outstanding = set() # currently outstanding feedback
+
+    def get_play(self, t_fb):
+        """ Get past play history at time t_fb """
+        assert(t_fb in self.play_history)
+        w_fb = self.play_history[t_fb][0] # past play
+        return w_fb
+
+    def get_history(self, t_fb):
+        """ Get parameters from history at time t_fb and delete
+        from storage to ensure sublinear memory """
+        assert(t_fb in self.play_history)
+        assert(t_fb in self.outstanding)
+
+        w_fb = self.play_history[t_fb][0] # past play
+        hint_fb = self.play_history[t_fb][1] # past hint
+        t_os = self.play_history[t_fb][2] # set of outstanding feedbacks at t_fb
+        params_fb = self.play_history[t_fb][3] # past play parameters  (optional)
+
+        D_fb = len(t_os) # length of delay at t_fb
+
+        # sum of outstanding gradients at t_fb
+        g_os = sum([self.gradient_history[t] \
+            for t in t_os]) 
+
+        del self.play_history[t_fb]
+
+        # Keep only gradient elements that remain outstanding 
+        os = [x[3] for x in self.play_history.values()]
+        os_all = set([t for t in os])
+        self.gradient_history = \
+            {k: self.gradient_history[k] for k in os_all}
+
+        return {
+            "t": t_fb,
+            "w": w_fb, 
+            "h": hint_fb,
+            "D": D_fb,
+            "g_os": g_os,
+            "params": params_fb
+        }
+
+    def normalize_by_partition(self, w):
+        """ Normalize weight vector by partition.
+
+        Args:
+            w (np.array): weight vector 
+        """
+        for k in self.partition_keys:     
+            p_ind = (self.partition == k)                             
+            w[p_ind] = (w[p_ind]/ np.sum(w[p_ind]))
+        return w
+        
+    def softmin_by_partition(self, theta, lam):
+        """ Return a vector w corresponding to a softmin of
+        vector theta with temperature parameter lam
+
+        Args:
+            theta (np.array): input vector
+            lam (float): temperature parameter 
+        """
+        # Initialize weight vector
+        w = np.zeros((self.d,))
+
+        # Iterate through partitions
+        for k in self.partition_keys:     
+            # Get partition subset
+            p_ind = (self.partition == k)                             
+            theta_sub = theta[p_ind]
+            w_sub = w[p_ind]
+
+            if np.isclose(self.lam, 0):
+                # Return uniform weights over minimizing values
+                w_i =  (theta_sub == theta_sub.min()) # get minimum index
+                w_sub[w_i] = 1.0  / np.sum(w_i)
+            else:
+                # Return numerically stable softmin
+                minval = np.min(theta_sub)
+                w_sub =  np.exp((-theta_sub + minval) / lam) 
+                w_sub = w_sub / np.sum(w_sub, axis=None)
+            
+            w[p_ind] = w_sub
+
+        # Check computation 
+        if np.isnan(w).any():
+            raise ValueError(f"Update produced NaNs: {self.w}")
+        if not np.isclose(np.sum(w), 1.0):
+            raise ValueError(f"Play w does not sum to 1: {self.w}")
+
+        return w
+
+    def init_weight_vector(self):
+        """ Returns uniform initialization weight vector. """          
+        w =  np.ones(self.d) / self.d
+        w = self.normalize_by_partition(w)
+        return w
+    
+    def get_weights(self):
+        ''' Returns dictionary of expert model names and current weights '''
+        return dict(zip(self.expert_models, self.w))
+
+    def loss_regret(self, g, w):
+        ''' Computes the loss regret w.r.t. a partition of the 
+        weight vector using loss gradient.
+
+        Args:
+            g (np.array): gradient vector
+            w (np.array): weight vector
+        '''
+        regret = np.zeros(g.shape)
+        for k in self.partition_keys:
+            p_ind = (self.partition == k)
+            regret[p_ind] = np.dot(g[p_ind], w[p_ind]) - g[p_ind] 
+        return regret
+            
+class AdaHedgeD(OnlineLearner):
+    """
+    AdaHedgeD module implements delayed AdaHedge 
+    online learning algorithm.
+    """    
+    def __init__(self, model_list, partition=None, T=None, reg="adahedged"):
+        """ Initializes online_expert 
+
+        Args:
+           reg (str): regularization strategy [ "dub | "adahedged" ], 
+                for Delayed Upper bound or AdaHedgeD-style 
+                adaptive regularization
+
+            Other args defined in OnlineLearner base class.
+        """                
+        # Base class constructor 
+        super().__init__(model_list, partition, T)
+
+        # Check and store regulraization 
+        supported_reg = ["adahedged", "dub"]
+        if reg not in supported_reg:
+            raise ValueError(
+                f"Unsupported regularizer for AdaHedgeD {reg}.")
+
+        self.reg = reg
+        self.reset_alg_params(T)
+
+    def get_learner_params(self):
+        """ Returns current algorithm parameters as a dictionary. """
+        return { 
+            'lam': self.lam,
+            'delta': self.delta,
+            'Delta': self.Delta,
+        }
+
+    def reset_alg_params(self, T):
+        """ Resets algorithm parameters for new duration T. 
+        
+        Args:
+            T (int): > 0, duration
+        """
+        # Base class reset 
+        super().reset_alg_params(T)
+
+        #  Algorithm parameters 
         self.w = self.init_weight_vector() # uniform weights
-        self.theta = np.zeros(self.w.shape) # dual-space parameter 
-        self.hint_prev = np.zeros(self.w.shape) # previous hint
+        self.theta = np.zeros((self.d, )) # dual-space parameter 
+        self.h = np.zeros((self.d,)) # dual-space parameter 
         self.lam = 0.0 # time varying regularization
+
+        # Regularization parameters
         self.alpha = np.log(self.d) # alpha parameter
         self.at_max = 0.0 # running max of a_t terms for DUB
         self.delta = 0.0 # per-iteration increase in step size
         self.Delta = 0.0 # cummulative sum of a_t^2 + 2b_t terms for DUB
 
-    def log_params(self):
-        # Update parameter logging 
-        params = {
-            't': self.t,
-            'delta': self.delta,
-            'lambda': self.lam
-        }
-        # Log model weights
-        for i in range(self.d):
-            params[f"model_{self.expert_models[i]}"] = float(self.w[i])
-        return params
+    def update(self, t_fb, g_fb, hist_fb):
+        """ Algorithm specific parameter updates.
 
-    def update(self, loss_input, hint=None): 
-        """ Update weight vector with feedback.
-        
         Args:
-            loss_input (dict): dictionary of input arguments
-                for OnlineLoss.loss_gradient at feedback time t-D 
-            hint (np.array): hint vector at time t, h_t
+            t_fb (int): feedback time
+            g_fb (np.array): feedback loss gradient
+            hist_fb (dict): dictionary of play history 
         """
-        # Incorporate loss from previous timestep
-        g_fb = self.loss_gradient(loss_input)  # compute loss gradient
-
-        # Default of zero optimistic hint
-        if hint is None:
-            hint = np.zeros(self.theta.shape)
-
         # Update dual-space parameter value with standard 
         # gradient update, sum of gradients
         self.theta = self.theta + g_fb 
 
         # Update regularization
-        if self.reg == "adaptive":
-            self.lam, self.delta  = \
-                self.get_reg(g_fb, **loss_input)
+        assert("lam" in hist_fb["params"])
+        if self.reg == "adahedged":
+            self.lam, self.delta  = self.get_reg(
+                g_fb, hist_fb["w"], hist_fb["h"],
+                hist_fb["g_os"], hist_fb["params"]["lam"])
         elif self.reg == "upper_bound":
-            self.lam, self.delta  = \
-                self.get_reg_uniform(g_fb, **loss_input)
+            self.lam, self.delta  = self.get_reg_uniform(
+                g_fb, hist_fb["w"], hist_fb["h"],
+                hist_fb["g_os"], hist_fb["D"])
+        else:
+            raise ValueError(f"Unrecognized regularizer {self.reg}")
+
+        print(self.lam, self.delta)
         
         # Update expert weights 
-        self.w = self.min_and_normalize(self.theta + hint)
+        self.w = self.softmin_by_partition(self.theta + self.h, self.lam)
 
-        # Update past hinter
-        self.hint_prev = copy.deepcopy(hint)
-
-        # Update algorithm iteration 
-        self.t += 1
-
-    def predict(self, cur_input): 
-        """ Make prediction using current weight vector.
-        
-        Args:
-            cur_input (np.array): matrix of model predictions 
-                at time t, X_t
-        """
-        return cur_input @ self.w
-
-    def get_reg(self, g_fb, w_fb, lam_fb, hint_fb, g_os):
+    def get_reg(self, g_fb, w_fb, hint_fb, g_os, lam_fb):
         """ Returns an updated AdaHedgeD-style regularizer
             g_fb (numpy.array): most recent feedback gradient t-D
             w_fb (numpy.array): play at time t-D
-            lam_fb (float): value of regularizer at t-D
             hint_fb (numpy.array): hint at t-D
             g_os (numpy.array): sum of gradients outstanding at time t-D
+            lam_fb (float): value of regularizer at t-D
         """
         # Get delta value
-        delta = self.get_delta(g_fb, w_fb, lam_fb, hint_fb, g_os)
+        delta = self.get_delta(g_fb, w_fb, hint_fb, g_os, lam_fb)
 
         # Update regularization
         eta = self.lam + delta / self.alpha 
         return eta, delta
 
-    def get_delta(self, g_fb, w_fb, lam_fb, hint_fb, g_os):
+    def get_delta(self, g_fb, w_fb, hint_fb, g_os, lam_fb):
         """ Computes change to AdaHedgeD-style regularizer.
             g_fb (numpy.array): most recent feedback gradient t-D
             w_fb (numpy.array): play at time t-D
-            lam_fb (float): value of regularizer at t-D
             hint_fb (numpy.array): hint at t-D
             g_os (numpy.array): sum of gradients outstanding at time t-D
+            lam_fb (float): value of regularizer at t-D
         """
         # Compute the Be-The-Regularized-Leader Solution using
         # \lam_{t-D} and g_{1:t-D}
-        w_btrl = self.min_and_normalize(self.theta, lam_fb)
+        w_btrl = self.softmin_by_partition(self.theta, lam_fb)
 
         # Compute drift delta
         delta_drift = np.dot(g_fb, w_fb - w_btrl)

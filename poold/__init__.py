@@ -2,7 +2,7 @@
 from .learners import AdaHedgeD 
 from .run import run
 
-def create(learner, loss, T, model_list, partition, **kwargs):
+def create(learner, model_list, partition=None, T=None, **kwargs):
     """
     Returns an online_expert object, instantiated with the passed in parameters.
 
@@ -18,14 +18,14 @@ def create(learner, loss, T, model_list, partition, **kwargs):
     Returns:
         oe (OnlineLearner): online learning object
     """
-    if alg == "dorm":
-        oe = DORM(loss, T, model_list, partition)  
-    elif alg == "dormp":
-        oe = DORMP(loss, T, model_list, partition)  
-    elif alg == "adahedged":
-        oe = AdaHedgeD(loss, T, model_list, partition, reg="adahedged")  
-    elif alg == "dub":
-        oe = AdaHedgeD(loss, T, model_list, partition, reg="dub")  
+    if learner == "dorm":
+        oe = DORM(model_list, partition, T)  
+    elif learner == "dormp":
+        oe = DORMP(model_list, partition, T) 
+    elif learner == "adahedged":
+        oe = AdaHedgeD(model_list, partition, T, reg="adahedged")  
+    elif learner == "dub":
+        oe = AdaHedgeD(model_list, partition, T, reg="dub")  
     else: 
-        raise ValueError(f"Unknown learning algorithm {alg}.")
+        raise ValueError(f"Unknown learning algorithm {learner}.")
     return oe
