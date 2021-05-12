@@ -1,36 +1,46 @@
 from abc import ABC, abstractmethod
 import os
 
-class Dataset(ABC):
+class Environment(ABC):
     """ Abstract dataset class for online learning """ 
-    def __init__(self, targets, models, **kwargs): 
+    def __init__(self, times, models, **kwargs): 
         """ Initialize dataset.
 
         Args:
-            targets (list): list of target prediction times
+            time (list): list of prediction times
             models (list): list of expert model names
         """
-        self.targets = targets
+        self.times = times 
         self.models = models
+        self.T = len(times) # algorithm duration 
 
     @abstractmethod
-    def get_model(self, target, model, **kwargs):
-        """ Get model prediction for a target time
+    def get_gt(self, t, **kwargs):
+        """ Get ground truth value at time t
 
         Args:
-            target: a target represetnation 
-            model: a model name representation
-        
-        Returns: 
+            t: a time represetnation 
         """
-    pass
+        pass
 
     @abstractmethod
-    def get_pred(self, target, **kwargs):
+    def get_pred(self, t, **kwargs):
         """  Get all model predictions and return a 
-        merged set of predictions for a target.
+        merged set of predictions for a time t.
 
         Args:
-            target: a target represetnation 
+            t: a time represetnation 
         """
-    pass
+        pass
+
+    @abstractmethod
+    def get_feedback(self, t, os_times=None, **kwargs):
+        """  Get subset of oustanding feedback (os_times) 
+        avaliable at time t. If os_times is None, get
+        all avaliable feedback.
+
+        Args:
+            t: a time represetnation 
+            os_times (list): list of outstanding feedback times
+        """
+        pass

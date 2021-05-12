@@ -19,7 +19,7 @@ class OnlineLearner(ABC):
                 e.g., np.array([1, 1, 2, 3, 3]) 
             T (int): > 0, algorithm duration, optional
         """                
-        self.t = 1 # current algorithm time
+        self.t = 0 # current algorithm time
         self.T = T # algorithm horizon
 
         # Set up expert models
@@ -99,7 +99,8 @@ class OnlineLearner(ABC):
         w_fb = self.get_play(t_fb)
 
         # Get linearized loss at feedback time
-        g_fb = loss_fb['jac'](w_fb)  
+
+        g_fb = loss_fb['jac'](w=w_fb)  
         self.gradient_history[t_fb] = copy.copy(g_fb)
 
         if hint is None:
@@ -136,7 +137,7 @@ class OnlineLearner(ABC):
             T (int): > 0, duration
         """
         # Reset algorithm duration
-        self.t = 1 # current algorithm time
+        self.t = 0 # current algorithm time
         self.T = T # algorithm duration 
 
         # Record keeping 
@@ -170,10 +171,14 @@ class OnlineLearner(ABC):
         del self.play_history[t_fb]
 
         # Keep only gradient elements that remain outstanding 
-        os = [x[3] for x in self.play_history.values()]
-        os_all = set([t for t in os])
+        os = [x[2] for x in self.play_history.values()]
+
+        # Flatten and find unique outstanding feedbacks
+        os_all = set([x for sublist in os for x in sublist])
+
+        # Subset gradient history to only outstanding feedbacks
         self.gradient_history = \
-            {k: self.gradient_history[k] for k in os_all}
+            {k: self.gradient_history[k] for k in os_all if k in self.gradient_history}
 
         return {
             "t": t_fb,
@@ -213,7 +218,7 @@ class OnlineLearner(ABC):
             theta_sub = theta[p_ind]
             w_sub = w[p_ind]
 
-            if np.isclose(self.lam, 0):
+            if np.isclose(lam, 0):
                 # Return uniform weights over minimizing values
                 w_i =  (theta_sub == theta_sub.min()) # get minimum index
                 w_sub[w_i] = 1.0  / np.sum(w_i)
@@ -227,9 +232,9 @@ class OnlineLearner(ABC):
 
         # Check computation 
         if np.isnan(w).any():
-            raise ValueError(f"Update produced NaNs: {self.w}")
+            raise ValueError(f"Update produced NaNs: {w}")
         if not np.isclose(np.sum(w), 1.0):
-            raise ValueError(f"Play w does not sum to 1: {self.w}")
+            raise ValueError(f"Play w does not sum to 1: {w}")
 
         return w
 
@@ -338,8 +343,6 @@ class AdaHedgeD(OnlineLearner):
         else:
             raise ValueError(f"Unrecognized regularizer {self.reg}")
 
-        print(self.lam, self.delta)
-        
         # Update expert weights 
         self.w = self.softmin_by_partition(self.theta + self.h, self.lam)
 
