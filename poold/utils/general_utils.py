@@ -1,4 +1,4 @@
-# General utility functions for all parts of the pipeline
+""" General utility functions. """
 import os
 import sys
 import time

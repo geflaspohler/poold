@@ -1,10 +1,16 @@
-from abc import ABC, abstractmethod
-import numpy as np 
-import pandas as pd
-import copy
-import pdb 
 
-from poold.utils import tic, toc, printf
+""" History object for book-keeping online learning progress. 
+
+For example:
+
+    import poold
+
+    models = ["model1", "model2"]
+    duration = 20
+    learner = poold.create("adahedged", model_list=models, T=duration)
+    history = poold.History(learner.w)
+"""
+import copy
 
 class History(object):
     def __init__(self, w_init):
