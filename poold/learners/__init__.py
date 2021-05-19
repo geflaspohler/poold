@@ -1,1 +1,1 @@
-from .learners import AdaHedgeD
+from .learners import AdaHedgeD, History

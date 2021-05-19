@@ -6,6 +6,50 @@ import pdb
 
 from poold.utils import tic, toc, printf
 
+class History(object):
+    def __init__(self, w_init):
+        self.play_history = {}
+        self.loss_history = {}
+        self.grads = {}
+        self.losses = {}
+
+        self.play_init = copy.copy(w_init)
+
+    def record_play(self, t, w):
+        self.play_history[t] = copy.copy(w)
+
+    def update_loss(self, t, loss):
+        assert(t in self.play_history)
+        if t in self.play_history:
+            self.loss_history[t] = copy.copy(loss)
+            self.grads[t] = loss['jac'](w=self.play_history[t])
+            self.losses[t] = loss['fun'](w=self.play_history[t])
+
+    def get_loss(self, t):
+        assert(t in self.loss_history)
+        return self.loss_history[t]
+
+    def get_grad(self, t):
+        assert(t in self.grads)
+        return self.grads[t]
+
+    def get_play(self, t, return_past=True):
+        # Return initial value before the first play
+        if t == 0 and t not in self.play_history:
+            return self.play_init
+
+        # If past play is in history, return most recent play
+        if t not in self.play_history and \
+            return_past and t-1 in self.play_history:
+            return self.play_history[t-1]
+
+        assert(t in self.play_history)
+        return self.play_history[t]
+
+    def get_last_play(self):
+        t_max = max(list(self.play_history.keys()))
+        return self.play_history[t_max]
+
 class OnlineLearner(ABC):
     """ OnlineLearner abstract base class. """    
     def __init__(self, model_list, partition=None, T=None, **kwargs):
@@ -34,13 +78,14 @@ class OnlineLearner(ABC):
         self.partition_keys = list(set(self.partition))
 
     @abstractmethod
-    def update(self, t_fb, g_fb, hist_fb):
+    def learner_update(self, t_fb, g_fb, hist_fb, hint, **kwargs):
         """ Algorithm specific parameter updates.
 
         Args:
             t_fb (int): feedback time
             g_fb (np.array): feedback loss gradient
             hist_fb (dict): dictionary of play history 
+            hint (np.array): hint vector at time t
         """
         pass
 
@@ -49,7 +94,7 @@ class OnlineLearner(ABC):
         """ Returns current algorithm parameters as a dictionary. """
         pass
 
-    def play(self): 
+    def play(self, **kwargs): 
         """ Play current weight vector and update history."""
         # Add to set missing feedback
         self.outstanding.add(self.t)
@@ -69,13 +114,15 @@ class OnlineLearner(ABC):
 
         return self.w
 
-    def feedback(self, t_fb, loss_fb, hint=None): 
+    def update(self, t, times_fb, losses_fb, hint):
         """ Update weight vector with received feedback
         and any available hints.
         
         Args:
-            t_fb (int): feedback for round t_fb
-            loss (dict): dictionary of the form:
+            t (int): current time
+            times_fb (list[int]): list of avaliable feedback times
+            losses_fb (list[dict]): list of loss dictionaries for 
+                feedback times, where each dist is of the form:
                 {
                     "fun" (callable, optional): function handle for 
                         the loss as a function of play w
@@ -83,7 +130,7 @@ class OnlineLearner(ABC):
                         gradient as a function of play w
                 }
                 for loss at feedback time t_fb
-            hint (dict): dictionary of the form:
+            hint (dict): hint dictionary of the form:
                 {
                     "fun" (callable, optional): function handle for 
                         the hint as a function of play w
@@ -94,36 +141,47 @@ class OnlineLearner(ABC):
                 }
                 for the hint pseudoloss at time self.t 
         """
+        if hint is None:
+            # Default of zero optimistic hint
+            h = np.zeros((self.d,))
+        elif "g" in hint:
+            # Use pre-computed hint gradient
+            h = hint["g"]
+        else:
+            # Compute loss gradient at current self.w
+            h = hint['jac'](self.w)  
 
+        for t_fb, loss_fb in zip(times_fb, losses_fb):
+            # Update learner for a single timestep 
+            self.update_single(t_fb, loss_fb, hint)
+
+            # Update history
+            self.outstanding.remove(t_fb)
+
+    def update_single(self, t_fb, loss_fb, hint=None): 
+        """ Update weight vector with received feedback
+        and any available hints.
+        
+        Args:
+            t_fb (int): feedback for round t_fb
+            loss_fb (dict): loss dictionary as described in :update
+            hint (dict): hint dictionary as described in :update
+        """
         # Get previous play 
         w_fb = self.get_play(t_fb)
 
         # Get linearized loss at feedback time
-
         g_fb = loss_fb['jac'](w=w_fb)  
         self.gradient_history[t_fb] = copy.copy(g_fb)
-
-        if hint is None:
-            # Default of zero optimistic hint
-            self.h = np.zeros((self.d,))
-        elif "g" in hint:
-            # Use pre-computed hint gradient
-            self.h = hint["g"]
-        else:
-            # Compute loss gradient at current self.w
-            self.h = hint['jac'](self.w)  
 
         # Get play history at time t_fb
         hist_fb = self.get_history(t_fb)
 
         # Algorithm specific parameter updates
-        self.update(t_fb, g_fb, hist_fb)
-
-        # Update history
-        self.outstanding.remove(t_fb)
+        self.learner_update(t_fb, g_fb, hist_fb, hint)
 
     def log_params(self):
-        # Update parameter logging 
+        """ Return dictionary of algorithm parameters """
         params = {'t': self.t} + self.get_learner_params()
         # Log model weights
         for i in range(self.d):
@@ -309,7 +367,7 @@ class AdaHedgeD(OnlineLearner):
         #  Algorithm parameters 
         self.w = self.init_weight_vector() # uniform weights
         self.theta = np.zeros((self.d, )) # dual-space parameter 
-        self.h = np.zeros((self.d,)) # dual-space parameter 
+        self.h = np.zeros((self.d,)) # last provided hint vector 
         self.lam = 0.0 # time varying regularization
 
         # Regularization parameters
@@ -318,14 +376,22 @@ class AdaHedgeD(OnlineLearner):
         self.delta = 0.0 # per-iteration increase in step size
         self.Delta = 0.0 # cummulative sum of a_t^2 + 2b_t terms for DUB
 
-    def update(self, t_fb, g_fb, hist_fb):
-        """ Algorithm specific parameter updates.
+    def learner_update(self, t_fb, g_fb, hist_fb, hint):
+        """ Algorithm specific parameter updates. If t_fb 
+        is None, perform a hint-only parameter update 
 
         Args:
             t_fb (int): feedback time
             g_fb (np.array): feedback loss gradient
             hist_fb (dict): dictionary of play history 
+            hint (np.array): hint vector at time t
         """
+        # Hint only update
+        if t_fb is None:
+            self.w = self.softmin_by_partition(self.theta + hint, self.lam)
+            self.h = copy.deepcopy(hint)
+            return
+
         # Update dual-space parameter value with standard 
         # gradient update, sum of gradients
         self.theta = self.theta + g_fb 
@@ -344,7 +410,8 @@ class AdaHedgeD(OnlineLearner):
             raise ValueError(f"Unrecognized regularizer {self.reg}")
 
         # Update expert weights 
-        self.w = self.softmin_by_partition(self.theta + self.h, self.lam)
+        self.w = self.softmin_by_partition(self.theta + hint, self.lam)
+        self.h = copy.deepcopy(hint)
 
     def get_reg(self, g_fb, w_fb, hint_fb, g_os, lam_fb):
         """ Returns an updated AdaHedgeD-style regularizer

@@ -3,30 +3,19 @@ import os
 
 class Environment(ABC):
     """ Abstract dataset class for online learning """ 
-    def __init__(self, times, models, **kwargs): 
+    def __init__(self, times, **kwargs): 
         """ Initialize dataset.
 
         Args:
             time (list): list of prediction times
-            models (list): list of expert model names
+            models: representation of input models
         """
         self.times = times 
-        self.models = models
         self.T = len(times) # algorithm duration 
 
     @abstractmethod
-    def get_gt(self, t, **kwargs):
-        """ Get ground truth value at time t
-
-        Args:
-            t: a time represetnation 
-        """
-        pass
-
-    @abstractmethod
-    def get_pred(self, t, **kwargs):
-        """  Get all model predictions and return a 
-        merged set of predictions for a time t.
+    def get_loss(self, t, **kwargs):
+        """ Get loss function at time t
 
         Args:
             t: a time represetnation 
