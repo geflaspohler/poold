@@ -1,7 +1,7 @@
 # from .learners import DORM, DORMP, AdaHedgeD
 from .learners import AdaHedgeD 
 from .environment import Environment 
-from .run import run
+from .utils import History
 
 def create(learner, model_list, partition=None, T=None, **kwargs):
     """
@@ -17,16 +17,21 @@ def create(learner, model_list, partition=None, T=None, **kwargs):
             e.g., np.array([1, 1, 2, 3, 3]) 
 
     Returns:
-        oe (OnlineLearner): online learning object
+        ol (OnlineLearner): online learning object
+        history (History): online learning history object
     """
     if learner == "dorm":
-        oe = DORM(model_list, partition, T)  
+        ol = DORM(model_list, partition, T)  
     elif learner == "dormp":
-        oe = DORMP(model_list, partition, T) 
+        ol = DORMP(model_list, partition, T) 
     elif learner == "adahedged":
-        oe = AdaHedgeD(model_list, partition, T, reg="adahedged")  
+        ol = AdaHedgeD(model_list, partition, T, reg="adahedged")  
     elif learner == "dub":
-        oe = AdaHedgeD(model_list, partition, T, reg="dub")  
+        ol = AdaHedgeD(model_list, partition, T, reg="dub")  
     else: 
         raise ValueError(f"Unknown learning algorithm {learner}.")
-    return oe
+
+    # Create online learning history 
+    history = History(ol.w)
+
+    return ol, history

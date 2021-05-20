@@ -32,11 +32,12 @@ class Hinter(ABC):
         pass
 
     @abstractmethod
-    def get_hint(self, t, **kwargs):
+    def get_hint(self, t, os_times, **kwargs):
         """ Get hint at time t.
 
         Args:
             t: current time
+            os_times (list): outstanding feedback times
 
         Returns: hint object
         """

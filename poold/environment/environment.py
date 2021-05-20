@@ -24,7 +24,7 @@ bookkeeping necessary to provide loss outputs.
 
         def get_feedback(self, t, os_times=None):
             if os_times is None:
-                os_times = range(t)
+                os_times = range(self.T)
             return [t_os for t_os os_times if t_os < t - self.D]
 """
 

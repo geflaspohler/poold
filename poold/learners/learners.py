@@ -24,6 +24,8 @@ import numpy as np
 import pandas as pd
 import copy
 
+from ..utils import loss_regret, normalize_by_partition
+
 class OnlineLearner(ABC):
     """ OnlineLearner abstract base class. """    
     def __init__(self, model_list, partition=None, T=None, **kwargs):
@@ -32,7 +34,7 @@ class OnlineLearner(ABC):
             model_list (list[str]): list of strings indicating 
                 expert model names
                 e.g., ["doy", "cfsv2"]
-            partition (numpy.array): mask partitioning learners 
+            partition (list[int]): mask partitioning learners 
                 for different tasks into separate simplicies,
                 e.g., np.array([1, 1, 2, 3, 3]) means to use
                 model_list[0:2] for the first task,
@@ -242,17 +244,6 @@ class OnlineLearner(ABC):
             "params": params_fb
         }
 
-    def normalize_by_partition(self, w):
-        """ Normalize weight vector by partition.
-
-        Args:
-            w (np.array): weight vector 
-        """
-        for k in self.partition_keys:     
-            p_ind = (self.partition == k)                             
-            w[p_ind] = (w[p_ind]/ np.sum(w[p_ind]))
-        return w
-        
     def softmin_by_partition(self, theta, lam):
         """ Return a vector w corresponding to a softmin of
         vector theta with temperature parameter lam
@@ -294,26 +285,12 @@ class OnlineLearner(ABC):
     def init_weight_vector(self):
         """ Returns uniform initialization weight vector. """          
         w =  np.ones(self.d) / self.d
-        w = self.normalize_by_partition(w)
+        w = normalize_by_partition(w, self.partition)
         return w
     
     def get_weights(self):
         ''' Returns dictionary of expert model names and current weights '''
         return dict(zip(self.expert_models, self.w))
-
-    def loss_regret(self, g, w):
-        ''' Computes the loss regret w.r.t. a partition of the 
-        weight vector using loss gradient.
-
-        Args:
-            g (np.array): gradient vector
-            w (np.array): weight vector
-        '''
-        regret = np.zeros(g.shape)
-        for k in self.partition_keys:
-            p_ind = (self.partition == k)
-            regret[p_ind] = np.dot(g[p_ind], w[p_ind]) - g[p_ind] 
-        return regret
 
 class AdaHedgeD(OnlineLearner):
     """
