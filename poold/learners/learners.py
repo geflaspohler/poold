@@ -57,15 +57,10 @@ class OnlineLearner(ABC):
             self.partition = np.ones(len(self.expert_models),)
         self.partition_keys = list(set(self.partition))
 
-    def update(self, t, times_fb, losses_fb, hint):
-        """ Update online learner and generate a new play.
-        
-        Update weight vector with received feedback
-        and any available hints. Update history and return 
-        play for time t.
-        
+    def record_loss(self, t, times_fb, losses_fb):
+        """ Updates learner gradient history with loss feedback
+
         Args:
-            t (int): current time
             times_fb (list[int]): list of avaliable feedback times
             losses_fb (list[dict]): list of loss dictionaries for 
                 feedback times, where each dict is of the form:
@@ -76,6 +71,27 @@ class OnlineLearner(ABC):
                         gradient as a function of play w
                 }
                 for loss at feedback time t_fb
+        """
+        for t_fb, loss_fb in zip(times_fb, losses_fb):
+            # Get previous play 
+            w_fb = self.get_play(t_fb)
+
+            # Get linearized loss at feedback time
+            g_fb = loss_fb['jac'](w=w_fb)  
+
+            # Update gradient history 
+            self.gradient_history[t_fb] = copy.copy(g_fb)
+
+    def update(self, t, times_fb, hint):
+        """ Update online learner and generate a new play.
+        
+        Update weight vector with received feedback
+        and any available hints. Update history and return 
+        play for time t.
+        
+        Args:
+            t (int): current time
+            times_fb (list[int]): list of feedback times
             hint (dict): hint dictionary of the form:
                 {
                     "fun" (callable, optional): function handle for 
@@ -108,11 +124,11 @@ class OnlineLearner(ABC):
         # Compute all algorithm updates
         if len(times_fb) == 0:
             # Hint-only algorithm updates
-            self.learner_update(t_fb=None, g_fb=None, hist_fb=None, hint=self.h)
+            self.update_single(t_fb=None, hint=self.h)
         else:
-            for t_fb, loss_fb in zip(times_fb, losses_fb):
+            for t_fb in times_fb:
                 # Update learner for a single timestep 
-                g_fb = self.update_single(t_fb, loss_fb, self.h)
+                self.update_single(t_fb=t_fb, hint=self.h)
 
                 # Update history
                 self.outstanding.remove(t_fb)
@@ -131,43 +147,33 @@ class OnlineLearner(ABC):
         self.t += 1
         return self.w
 
-    def update_single(self, t_fb, loss_fb, hint): 
+    def update_single(self, t_fb, hint): 
         """ Update weight vector with received feedback
         and any available hints.
         
         Args:
             t_fb (int): feedback for round t_fb
-            loss_fb (dict): loss dictionary as described in :update
             hint (np.array): hint vector
-
-        Returns:
-            g_fb: gradient at time t_fb
         """
-        # Get previous play 
-        w_fb = self.get_play(t_fb)
-
-        # Get linearized loss at feedback time
-        g_fb = loss_fb['jac'](w=w_fb)  
-        # Update gradient history 
-        self.gradient_history[t_fb] = copy.copy(g_fb)
+        if t_fb is None:
+            self.learner_update(t_fb=None, fb=None, hint=hint)
+            return
 
         # Get play history at time t_fb
-        hist_fb = self.get_history(t_fb)
+        fb = self.get_history(t_fb)
 
         # Algorithm specific parameter updates
-        self.learner_update(t_fb, g_fb, hist_fb, hint)
-
-        return g_fb
+        self.learner_update(t_fb, fb, hint)
 
     @abstractmethod
-    def learner_update(self, t_fb, g_fb, hist_fb, hint, **kwargs):
+    def learner_update(self, t_fb, fb, hint, **kwargs):
         """ Algorithm specific parameter updates. If t_fb 
         is None, perform a hint-only parameter update.
 
         Args:
             t_fb (int): feedback time
-            g_fb (np.array): feedback loss gradient
-            hist_fb (dict): dictionary of play history 
+            fb (dict): dictionary of play details at 
+                feedback time
             hint (np.array): hint vector at time t
         """
         pass
@@ -207,14 +213,24 @@ class OnlineLearner(ABC):
         w_fb = self.play_history[t_fb][0] # past play
         return w_fb
 
-    def get_history(self, t_fb):
+    def get_history(self, t_fb, remove=False):
         """ Get parameters from history at time t_fb and delete
-        from storage to ensure sublinear memory """
+        from storage to ensure sublinear memory 
+        
+        Args:
+            t_fb: a time representation
+        """
         assert(t_fb in self.play_history)
         assert(t_fb in self.outstanding)
 
-        w_fb = self.play_history[t_fb][0] # past play
-        hint_fb = self.play_history[t_fb][1] # past hint
+        w_fb = self.play_history[t_fb][0] # play
+        hint_fb = self.play_history[t_fb][1] # hint
+
+        if t_fb-1 in self.play_history:
+            hint_pfb = self.play_history[t_fb-1][1] # past hint
+        else:
+            hint_pfb = np.zeros((self.d,))
+
         t_os = self.play_history[t_fb][2] # set of outstanding feedbacks at t_fb
         params_fb = self.play_history[t_fb][3] # past play parameters  (optional)
 
@@ -223,23 +239,28 @@ class OnlineLearner(ABC):
         # sum of outstanding gradients at t_fb
         g_os = sum([self.gradient_history[t] \
             for t in t_os]) 
+        g_fb = self.gradient_history[t_fb]
 
-        del self.play_history[t_fb]
+        if remove:
+            # Delete from play history
+            del self.play_history[t_fb]
 
-        # Keep only gradient elements that remain outstanding 
-        os = [x[2] for x in self.play_history.values()]
+            # Keep only gradient elements that remain outstanding 
+            os = [x[2] for x in self.play_history.values()]
 
-        # Flatten and find unique outstanding feedbacks
-        os_all = set([x for sublist in os for x in sublist])
+            # Flatten and find unique outstanding feedbacks
+            os_all = set([x for sublist in os for x in sublist])
 
-        # Subset gradient history to only outstanding feedbacks
-        self.gradient_history = \
-            {k: self.gradient_history[k] for k in os_all if k in self.gradient_history}
+            # Subset gradient history to only outstanding feedbacks
+            self.gradient_history = \
+                {k: self.gradient_history[k] for k in os_all if k in self.gradient_history}
 
         return {
             "t": t_fb,
             "w": w_fb, 
+            "g": g_fb,
             "h": hint_fb,
+            "hp": hint_pfb,
             "D": D_fb,
             "g_os": g_os,
             "params": params_fb
@@ -350,42 +371,43 @@ class AdaHedgeD(OnlineLearner):
         self.delta = 0.0 # per-iteration increase in step size
         self.Delta = 0.0 # cummulative sum of a_t^2 + 2b_t terms for DUB
 
-    def learner_update(self, t_fb, g_fb, hist_fb, hint):
+    def learner_update(self, t_fb, fb, hint):
         """ Algorithm specific parameter updates. If t_fb 
         is None, perform a hint-only parameter update 
 
         Args:
             t_fb (int): feedback time
-            g_fb (np.array): feedback loss gradient
-            hist_fb (dict): dictionary of play history 
+            fb (dict): dictionary of play details at 
+                feedback time
             hint (np.array): hint vector at time t
         """
         # Hint only update
         if t_fb is None:
             self.w = self.softmin_by_partition(self.theta + hint, self.lam)
-            assert(np.isclose(self.w.sum(), 1.0))
             return
+
+        # Get feedback gradient
+        g_fb = fb['g']
 
         # Update dual-space parameter value with standard 
         # gradient update, sum of gradients
         self.theta = self.theta + g_fb 
 
         # Update regularization
-        assert("lam" in hist_fb["params"])
+        assert("lam" in fb["params"])
         if self.reg == "adahedged":
             self.lam, self.delta  = self.get_reg(
-                g_fb, hist_fb["w"], hist_fb["h"],
-                hist_fb["g_os"], hist_fb["params"]["lam"])
+                g_fb, fb["w"], fb["h"],
+                fb["g_os"], fb["params"]["lam"])
         elif self.reg == "dub":
             self.lam, self.delta  = self.get_reg_uniform(
-                g_fb, hist_fb["w"], hist_fb["h"],
-                hist_fb["g_os"], hist_fb["D"])
+                g_fb, fb["w"], fb["h"],
+                fb["g_os"], fb["D"])
         else:
             raise ValueError(f"Unrecognized regularizer {self.reg}")
 
         # Update expert weights 
         self.w = self.softmin_by_partition(self.theta + hint, self.lam)
-        assert(np.isclose(self.w.sum(), 1.0))
 
     def get_reg(self, g_fb, w_fb, hint_fb, g_os, lam_fb):
         """ Returns an updated AdaHedgeD-style regularizer
@@ -515,27 +537,28 @@ class DORM(OnlineLearner):
         #  Algorithm parameters 
         self.regret = np.zeros((self.d,)) # cumulative regret vector 
 
-    def learner_update(self, t_fb, g_fb, hist_fb, hint):
+    def learner_update(self, t_fb, fb, hint):
         """ Algorithm specific parameter updates. If t_fb 
         is None, perform a hint-only parameter update 
 
         Args:
             t_fb (int): feedback time
-            g_fb (np.array): feedback loss gradient
-            hist_fb (dict): dictionary of play history 
+            fb (dict): dictionary of play details at 
+                feedback time
             hint (np.array): hint vector at time t
         """
         # Hint only update
         if t_fb is None:
             regret_pos = np.maximum(0, hint)
             self.w = normalize_by_partition(regret_pos, self.partition)
-            assert(np.isclose(self.w.sum(), 1.0))
             return 
 
         # Update dual-space parameter value with standard 
         # regret gradient update, sum of gradients
-        assert("w" in hist_fb)
-        w_fb = hist_fb["w"]
+        assert("w" in fb)
+        assert("g" in fb)
+        g_fb = fb['g'] # get feedback gradient
+        w_fb = fb["w"] # get feedback play 
         regret_fb = loss_regret(g_fb, w_fb, self.partition) # compute regret w.r.t. partition 
         self.regret = self.regret + regret_fb 
 
@@ -544,10 +567,6 @@ class DORM(OnlineLearner):
 
         # Update expert weights 
         self.w = normalize_by_partition(regret_pos, self.partition)
-        try:
-            assert(np.isclose(self.w.sum(), 1.0))
-        except:
-            pdb.set_trace()
 
 class DORMPlus(OnlineLearner):
     """
@@ -584,14 +603,14 @@ class DORMPlus(OnlineLearner):
         self.p = np.zeros((self.d,)) # must initialize initial pseudo-play to zero
         self.hint_prev = np.zeros((self.d,)) # past hint
 
-    def learner_update(self, t_fb, g_fb, hist_fb, hint):
+    def learner_update(self, t_fb, fb, hint):
         """ Algorithm specific parameter updates. If t_fb 
         is None, perform a hint-only parameter update 
 
         Args:
             t_fb (int): feedback time
-            g_fb (np.array): feedback loss gradient
-            hist_fb (dict): dictionary of play history 
+            fb (dict): dictionary of play details at 
+                feedback time
             hint (np.array): hint vector at time t
         """
         # Hint only update
@@ -599,13 +618,15 @@ class DORMPlus(OnlineLearner):
             self.p = np.maximum(0, self.p + hint - self.hint_prev)
             self.w = normalize_by_partition(self.p, self.partition)
             self.hint_prev = copy.deepcopy(hint)
-            assert(np.isclose(self.w.sum(), 1.0))
+            
             return 
 
         # Update dual-space parameter value with standard 
         # regret gradient update, sum of gradients
-        assert("w" in hist_fb)
-        w_fb = hist_fb["w"]
+        assert("w" in fb)
+        assert("g" in fb)
+        w_fb = fb["w"]
+        g_fb = fb["g"]
         regret_fb = loss_regret(g_fb, w_fb, self.partition) # compute regret w.r.t. partition 
 
         # Update psuedo-play 
@@ -613,4 +634,3 @@ class DORMPlus(OnlineLearner):
 
         # Update expert weights 
         self.w = normalize_by_partition(self.p, self.partition)
-        assert(np.isclose(self.w.sum(), 1.0))
