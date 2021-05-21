@@ -3,8 +3,8 @@ from functools import partial
 from datetime import datetime, timedelta
 import pdb
 
-from s2s_environment import S2SEnvironment, RodeoLoss
-from s2s_hints import S2SHinter
+from src.s2s_environment import S2SEnvironment, RodeoLoss
+from src.s2s_hints import S2SHinter
 from src.utils.eval_util import get_target_dates
 from src.utils.experiments_util import get_start_delta
 
