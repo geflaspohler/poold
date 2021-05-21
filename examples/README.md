@@ -1,7 +1,7 @@
 
 ## Subseasonal Climate Forecasting Example
 ==============================
-[TODO] Unzip the data and models files
+[TODO] Unzip the data and models files and place in `examples/s2s_forecast` directory.
 
 To run the example code:
 ```
