@@ -18,13 +18,14 @@ For example:
     learner = poold.create("adahedged", model_list=models, T=duration)
 
 """
-
 from abc import ABC, abstractmethod
 import numpy as np 
 import pandas as pd
 import copy
 
 from ..utils import loss_regret, normalize_by_partition
+
+import pdb # TODO: delete this import
 
 class OnlineLearner(ABC):
     """ OnlineLearner abstract base class. """    
@@ -335,9 +336,11 @@ class AdaHedgeD(OnlineLearner):
         """
         # Base class reset 
         super().init_alg_params(T)
+        
+        # Initialize play
+        self.w = self.init_weight_vector() # uniform weights
 
         #  Algorithm parameters 
-        self.w = self.init_weight_vector() # uniform weights
         self.theta = np.zeros((self.d, )) # dual-space parameter 
         self.lam = 0.0 # time varying regularization
 
@@ -360,6 +363,7 @@ class AdaHedgeD(OnlineLearner):
         # Hint only update
         if t_fb is None:
             self.w = self.softmin_by_partition(self.theta + hint, self.lam)
+            assert(np.isclose(self.w.sum(), 1.0))
             return
 
         # Update dual-space parameter value with standard 
@@ -372,7 +376,7 @@ class AdaHedgeD(OnlineLearner):
             self.lam, self.delta  = self.get_reg(
                 g_fb, hist_fb["w"], hist_fb["h"],
                 hist_fb["g_os"], hist_fb["params"]["lam"])
-        elif self.reg == "upper_bound":
+        elif self.reg == "dub":
             self.lam, self.delta  = self.get_reg_uniform(
                 g_fb, hist_fb["w"], hist_fb["h"],
                 hist_fb["g_os"], hist_fb["D"])
@@ -381,6 +385,7 @@ class AdaHedgeD(OnlineLearner):
 
         # Update expert weights 
         self.w = self.softmin_by_partition(self.theta + hint, self.lam)
+        assert(np.isclose(self.w.sum(), 1.0))
 
     def get_reg(self, g_fb, w_fb, hint_fb, g_os, lam_fb):
         """ Returns an updated AdaHedgeD-style regularizer
@@ -413,15 +418,15 @@ class AdaHedgeD(OnlineLearner):
         delta_drift = np.dot(g_fb, w_fb - w_btrl)
 
         # Compute auxiliary regret delta 
-        g_diff = hint_fb - g_os
-        maxval = np.max(g_diff[w_fb != 0.0])
-
         if np.isclose(lam_fb, 0):
-            delta_aux = -np.dot(g_diff - maxval, w_fb)
+            delta_aux = np.dot(self.theta, w_fb) - np.min(self.theta)
         else:
+            g_diff = hint_fb - g_os
+            maxval = np.max(g_diff[w_fb != 0.0])
+
             delta_aux = lam_fb * \
-                np.log(np.sum(w_fb * np.exp((g_diff - maxval) / lam_fb))) - \
-                np.dot(g_diff - maxval, w_fb)
+                np.log(np.sum(w_fb * np.exp((g_diff - maxval) / lam_fb))) + \
+                np.dot(-g_diff, w_fb) + maxval
 
         # Compute final delta term
         delta = max(min(delta_drift, delta_aux), 0.0)
@@ -459,7 +464,7 @@ class AdaHedgeD(OnlineLearner):
             g_os (numpy.array): sum of gradients outstanding at time t-D
         """
         g_norm = np.linalg.norm(g_fb, ord=np.inf)
-        err_norm = np.linalg.norm(hint_t - g_os, ord=np.inf)
+        err_norm = np.linalg.norm(hint_fb - g_os, ord=np.inf)
         return 2*np.min([g_norm, err_norm])
 
     def get_bt_bound(self, g_fb, hint_fb, g_os):
@@ -471,5 +476,141 @@ class AdaHedgeD(OnlineLearner):
             g_os (numpy.array): sum of gradients outstanding at time t-D
         """
         g_norm = np.linalg.norm(g_fb, ord=np.inf)
-        err_norm = np.linalg.norm(hint_t - g_os, ord=np.inf)
+        err_norm = np.linalg.norm(hint_fb - g_os, ord=np.inf)
         return np.min([0.5*(err_norm**2), g_norm * err_norm])
+
+class DORM(OnlineLearner):
+    """
+    DORM module implements delayed optimistc regret matching 
+    online learning algorithm.
+    """    
+    def __init__(self, model_list, partition=None, T=None):
+        """ Initializes online_expert 
+
+        Args:
+            Args defined in OnlineLearner base class.
+        """                
+        # Base class constructor 
+        super().__init__(model_list, partition, T)
+
+        #  Initialize learner
+        self.init_alg_params(T)
+
+    def get_learner_params(self):
+        """ Returns current algorithm parameters as a dictionary. """
+        return {}
+
+    def init_alg_params(self, T):
+        """ Resets algorithm parameters for new duration T. 
+        
+        Args:
+            T (int): > 0, duration
+        """
+        # Base class reset 
+        super().init_alg_params(T)
+
+        # Initialize play
+        self.w = self.init_weight_vector() # uniform weights
+
+        #  Algorithm parameters 
+        self.regret = np.zeros((self.d,)) # cumulative regret vector 
+
+    def learner_update(self, t_fb, g_fb, hist_fb, hint):
+        """ Algorithm specific parameter updates. If t_fb 
+        is None, perform a hint-only parameter update 
+
+        Args:
+            t_fb (int): feedback time
+            g_fb (np.array): feedback loss gradient
+            hist_fb (dict): dictionary of play history 
+            hint (np.array): hint vector at time t
+        """
+        # Hint only update
+        if t_fb is None:
+            regret_pos = np.maximum(0, hint)
+            self.w = normalize_by_partition(regret_pos, self.partition)
+            assert(np.isclose(self.w.sum(), 1.0))
+            return 
+
+        # Update dual-space parameter value with standard 
+        # regret gradient update, sum of gradients
+        assert("w" in hist_fb)
+        w_fb = hist_fb["w"]
+        regret_fb = loss_regret(g_fb, w_fb, self.partition) # compute regret w.r.t. partition 
+        self.regret = self.regret + regret_fb 
+
+        # Update regret
+        regret_pos = np.maximum(0, self.regret + hint)
+
+        # Update expert weights 
+        self.w = normalize_by_partition(regret_pos, self.partition)
+        try:
+            assert(np.isclose(self.w.sum(), 1.0))
+        except:
+            pdb.set_trace()
+
+class DORMPlus(OnlineLearner):
+    """
+    DORMPlus module implements delayed optimistc regret matching+
+    online learning algorithm.
+    """    
+    def __init__(self, model_list, partition=None, T=None):
+        """ Initializes online_expert 
+
+        Args:
+            Args defined in OnlineLearner base class.
+        """                
+        # Base class constructor 
+        super().__init__(model_list, partition, T)
+
+        #  Initialize learner
+        self.init_alg_params(T)
+
+    def get_learner_params(self):
+        """ Returns current algorithm parameters as a dictionary. """
+        return {}
+
+    def init_alg_params(self, T):
+        """ Resets algorithm parameters for new duration T. 
+        
+        Args:
+            T (int): > 0, duration
+        """
+        # Base class reset 
+        super().init_alg_params(T)
+
+        #  Algorithm parameters 
+        self.w = self.init_weight_vector() # uniform weights, initial play
+        self.p = np.zeros((self.d,)) # must initialize initial pseudo-play to zero
+        self.hint_prev = np.zeros((self.d,)) # past hint
+
+    def learner_update(self, t_fb, g_fb, hist_fb, hint):
+        """ Algorithm specific parameter updates. If t_fb 
+        is None, perform a hint-only parameter update 
+
+        Args:
+            t_fb (int): feedback time
+            g_fb (np.array): feedback loss gradient
+            hist_fb (dict): dictionary of play history 
+            hint (np.array): hint vector at time t
+        """
+        # Hint only update
+        if t_fb is None:
+            self.p = np.maximum(0, self.p + hint - self.hint_prev)
+            self.w = normalize_by_partition(self.p, self.partition)
+            self.hint_prev = copy.deepcopy(hint)
+            assert(np.isclose(self.w.sum(), 1.0))
+            return 
+
+        # Update dual-space parameter value with standard 
+        # regret gradient update, sum of gradients
+        assert("w" in hist_fb)
+        w_fb = hist_fb["w"]
+        regret_fb = loss_regret(g_fb, w_fb, self.partition) # compute regret w.r.t. partition 
+
+        # Update psuedo-play 
+        self.p = np.maximum(0, self.p + regret_fb + hint - self.hint_prev)
+
+        # Update expert weights 
+        self.w = normalize_by_partition(self.p, self.partition)
+        assert(np.isclose(self.w.sum(), 1.0))

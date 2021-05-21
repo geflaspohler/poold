@@ -467,7 +467,7 @@ class MeanObs(Hinter):
 
         if self.y_sum is None:
             # Get most recently available ground truth data
-            y_tilde = self.s2s_evn.most_recent_obs(t) 
+            y_tilde = self.s2s_env.most_recent_obs(t) 
         else:
             y_tilde = self.y_sum / self.y_len
 
@@ -498,7 +498,7 @@ class TrendObs(Hinter):
         w = self.s2s_history.get_play(t)
 
         if len(self.y_prev) < 2:
-            y_tilde = self.s2s_evn.most_recent_obs(t) 
+            y_tilde = self.s2s_env.most_recent_obs(t) 
         else:
             next_idx = (self.y_idx + 1) % 1
             y_tilde = (self.y_prev[next_idx] - self.y_prev[self.y_idx]) + self.y_prev[next_idx]

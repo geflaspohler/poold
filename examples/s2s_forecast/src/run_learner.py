@@ -27,29 +27,38 @@ T = len(dates) # algorithm duration
 partition = None
 
 # Online learning algorithm 
-learner, history = create("adahedged", model_list=models, partition=partition, T=T)
+learner, history = create("dormplus", model_list=models, partition=partition, T=T)
 
 # Subseasonal forecasting environment
 s2s_env = S2SEnvironment(dates, models, gt_id=gt_id, horizon=horizon)
 
 # Subseasonal forecasting hinter
-# horizon_hints = {"1day": ["prev_y"], 
-#                  "12w": ["mean_g", "prev_g"],
-#                  "34w": ["trend_y", "prev_g"],
-#                  "future": ["prev_g"],
-#                  "default":["prev_g"]}  
+hz_hints = True
+if hz_hints:
+    horizon_hints = {"1day": ["prev_y"], 
+                    "12w": ["mean_g", "prev_g"],
+                    "34w": ["trend_y", "prev_g"],
+                    "future": ["prev_g"],
+                    "default":["prev_g"]}  
+else:
+    horizon_hints = {"default": ["mean_g", "prev_g"]}  
 
-horizon_hints = {"1day": ["mean_g", "prev_g"], 
-                 "12w": ["mean_g", "prev_g"],
-                 "34w": ["mean_g", "prev_g"],
-                 "future": ["mean_g", "prev_g"],
-                 "default": ["mean_g", "prev_g"]}  
+#  Get name and parition for each of the hints
+n_hints = [sum(len(x) for x in horizon_hints)]
+if hz_hints: 
+    hint_models = ["h" + str(i) + "_" + "".join(item) for i, sublist in enumerate(horizon_hints.values()) for item in sublist]
+    hint_partition = [i for i, sublist in enumerate(horizon_hints.values()) for item in sublist]
+else:
+    hint_models = ["h" + str(i) + "_" + "".join(item) for i, sublist in enumerate(horizon_hints["default"]) for item in sublist]
+    hint_partition = [i for i, sublist in enumerate(horizon_hints["default"]) for item in sublist]    
 
-s2s_hinter = S2SHinter(hint_types=horizon_hints, gt_id=gt_id, horizon=horizon, dim=len(models), 
+
+s2s_hinter = S2SHinter(hint_types=horizon_hints, gt_id=gt_id, 
+                    horizon=horizon, dim=len(models), 
                     s2s_env=s2s_env, s2s_history=history, 
                     loss_gradient=s2s_env.rodeo_loss.loss_gradient,
-                    loss_regret=loss_regret, partition=partition,
-                    regret_hints=False, hz_hints=False)
+                    loss_regret=loss_regret, partition=hint_partition,
+                    regret_hints=False, hz_hints=hz_hints)
 
 # Iterate through algorithm times
 for t in range(T):
@@ -64,11 +73,13 @@ for t in range(T):
     hint = s2s_hinter.get_hint(t, history.os_preds)
 
     # Update learner with hint and feedback 
+    # if len(times_fb) > 0:
+    #     pdb.set_trace()
     w = learner.update(t, times_fb, losses_fb, hint)
 
     # Record play
     history.record_play(t, w)
-    print(f"t: {t} lam: {learner.lam} \n\t w: {w}")
+    print(f"t: {t} \n\t w: {w} \n\t params: {learner.get_learner_params()}")
 
     # Update history and hinter
     for t_fb, loss_fb in zip(times_fb, losses_fb):

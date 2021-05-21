@@ -1,5 +1,4 @@
-# from .learners import DORM, DORMP, AdaHedgeD
-from .learners import AdaHedgeD 
+from .learners import AdaHedgeD, DORM, DORMPlus
 from .environment import Environment 
 from .utils import History
 
@@ -22,8 +21,8 @@ def create(learner, model_list, partition=None, T=None, **kwargs):
     """
     if learner == "dorm":
         ol = DORM(model_list, partition, T)  
-    elif learner == "dormp":
-        ol = DORMP(model_list, partition, T) 
+    elif learner == "dormplus":
+        ol = DORMPlus(model_list, partition, T) 
     elif learner == "adahedged":
         ol = AdaHedgeD(model_list, partition, T, reg="adahedged")  
     elif learner == "dub":

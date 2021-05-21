@@ -36,6 +36,10 @@ def normalize_by_partition(w, partition):
     partition_keys = list(set(partition))
     for k in partition_keys:     
         p_ind = (partition == k)                             
-        w[p_ind] = (w[p_ind]/ np.sum(w[p_ind]))
+        if np.sum(w[p_ind]) > 0.0:
+            w[p_ind] = (w[p_ind]/ np.sum(w[p_ind]))
+        else: 
+            n_k = sum(p_ind)
+            w[p_ind] = 1./n_k * np.ones(n_k,) # Uniform
     return w
     
