@@ -1,6 +1,5 @@
 from .learners import AdaHedgeD, DORM, DORMPlus
 from .environment import Environment 
-from .utils import History
 
 def create(learner, model_list, partition=None, T=None, **kwargs):
     """
@@ -17,7 +16,6 @@ def create(learner, model_list, partition=None, T=None, **kwargs):
 
     Returns:
         ol (OnlineLearner): online learning object
-        history (History): online learning history object
     """
     if learner == "dorm":
         ol = DORM(model_list, partition, T)  
@@ -30,7 +28,4 @@ def create(learner, model_list, partition=None, T=None, **kwargs):
     else: 
         raise ValueError(f"Unknown learning algorithm {learner}.")
 
-    # Create online learning history 
-    history = History(ol.w)
-
-    return ol, history
+    return ol

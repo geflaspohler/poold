@@ -10,27 +10,35 @@ For example:
     learner, history = poold.create("adahedged", model_list=models, T=duration)
 """
 import copy
+import numpy as np
+import pdb
 
 class History(object):
-    def __init__(self, w_init):
+    def __init__(self, models, T):
         """ Online leanring history object.
 
         Args:
-            w_init: initialization value for online learner
+            models (list): list of model names
+            T (int): algorithm duration
         """
+        self.T = T # algorithm duration
+        self.models = models
+        self.d = len(models)
+        self.learner_base_time = 0 # learner base time
+
         self.play_history = {} # history of past algorithm plays
         self.loss_history = {} # history of past observed loss objects
-        self.grads = {} # history of past observed gradients
-        self.losses = {} # history of past realized losses
-        self.os_preds = [] # list of currently outstanding prediction times
+        self.hint_history = {} # history of past observed loss objects
+        self.grad_history = {} # history of past observed gradients
+        self.param_history = {} # history of past parameters 
+        self.os_history = {} # history of outstanding feedbacks 
+        self.realized_losses = {} # history of past realized losses
 
-        # Initialize the first play to algorithm init value
-        self.play_init = copy.copy(w_init)
-
-    def init_round(self, t):
-        """ Begin round t """
-        # Add current time to oustanding predictions
-        self.os_preds.append(t)
+    def reset(self, t):
+        """ Note in the history the the learner is restarting at time t. 
+        Increases the learner base time by t, so that the history is 
+        retrieved relative to the base_time. """
+        self.learner_base_time += t
 
     def record_play(self, t, w):
         """ Record play at round t.
@@ -39,44 +47,124 @@ class History(object):
             t: a time representation 
             w: a play representation
         """
+        t += self.learner_base_time
         self.play_history[t] = copy.copy(w)
 
-    def record_loss(self, t, loss):
+    def record_losses(self, t, losses_fb):
         """ Record the received loss at time t.
 
         Args:
             t: a time representation 
-            w: a loss representation
+            losses_fb: list of (time, loss objects) tuples
         """
-        assert(t in self.play_history)
-        self.loss_history[t] = copy.copy(loss)
-        self.grads[t] = loss['jac'](w=self.play_history[t])
-        self.losses[t] = loss['fun'](w=self.play_history[t])
-        self.os_preds.remove(t)
+        for t_fb, loss_fb in losses_fb:
+            t_fb += self.learner_base_time
+            try:
+                assert(t_fb in self.play_history)
+            except:
+                pdb.set_trace()
+            self.loss_history[t_fb] = copy.deepcopy(loss_fb)
+            self.grad_history[t_fb] = loss_fb['grad'](w=self.play_history[t_fb])
+            self.realized_losses[t_fb] = loss_fb['fun'](w=self.play_history[t_fb])
+
+    def record_hint(self, t, hint):
+        """ Record the received hint at time t.
+
+        Args:
+            t: a time representation 
+            hint (dict): hint dictionary  
+        """
+        t += self.learner_base_time
+        self.hint_history[t] = copy.deepcopy(hint)
+
+    def record_params(self, t, params):
+        """ Record the received hint at time t.
+
+        Args:
+            t: a time representation 
+            params (dict): parameter dictionary  
+        """
+        t += self.learner_base_time
+        self.param_history[t] = copy.deepcopy(params)
+
+    def record_os(self, t, os):
+        """ Record the outstanding feedbacks at time t.
+
+        Args:
+            t: a time representation 
+            os (list): list of oustanding feedback times
+        """
+        t += self.learner_base_time
+        self.os_history[t] = copy.deepcopy(os)
+
+    def get(self, t):
+        """ Get full history at time t """
+        g = self.get_grad(t)
+        w = self.get_play(t)
+        h = self.get_hint(t)
+        hp = self.get_hint(t-1)
+        params = self.get_params(t)
+        os = self.get_os(t)
+        D = len(os)
+        g_os = sum([self.get_grad(t_fb) for t_fb in os])
+
+        return {
+            "t": t, # time
+            "w": w, # play
+            "g": g, # gradient 
+            "g_os": g_os, # outstanding gradient sum
+            "h": h, # hint
+            "hp": hp, # previous hint
+            "D": D, # delay length 
+            "params": params # parameters
+        }
 
     def get_loss(self, t):
         """ Get the loss at time t """
+        t += self.learner_base_time
         assert(t in self.loss_history)
-        return self.loss_history[t]
+        return self.loss_history[t], self.realized_losses[t], self.grad_history[t]
 
     def get_grad(self, t):
         """ Get the loss gradient at time t """
-        assert(t in self.grads)
-        return self.grads[t]
+        t += self.learner_base_time
+        assert(t in self.grad_history)
+        return self.grad_history[t]
+
+    def get_hint(self, t):
+        """ Get the hint at time t """
+        t += self.learner_base_time
+        if t not in self.hint_history:
+            return np.zeros((self.d,))
+
+        assert(t in self.hint_history)
+        return self.hint_history[t]
+
+    def get_params(self, t):
+        """ Get the parameters at time t """
+        t += self.learner_base_time
+        assert(t in self.param_history)
+        return self.param_history[t]
+
+    def get_os(self, t):
+        """ Get the parameters at time t """
+        t += self.learner_base_time
+        assert(t in self.os_history)
+        return self.os_history[t]
 
     def get_play(self, t, return_past=True):
         """ Get the play at time t. If return_past is True,
         will return the play at t-1 if the play at time t 
         is not yet available.  
         """
-        # Return initial value before the first play
+        t += self.learner_base_time
+        # Initial value before the first play
         if t == 0 and t not in self.play_history:
-            return self.play_init
+            raise ValueError(f"Play {t} not yet in play history.")
 
         # If past play is in history, return most recent play
-        if t not in self.play_history and \
-            return_past and t-1 in self.play_history:
-            return self.play_history[t-1]
+        if t not in self.play_history and return_past:
+            return self.get_last_play()
 
         assert(t in self.play_history)
         return self.play_history[t]

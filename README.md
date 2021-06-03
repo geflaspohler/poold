@@ -14,13 +14,13 @@ This method initializes an online learning and online learning `History` object,
 record keeping of plays and losses observed during online learning. 
 
 At each round  `t`, the learner expects to receive a set of loss feedbacks `losses_fb` at times `times_fb`,
-and an optimistic hint `hint`, and will product a play `w`:
+and an optimistic hint `hint`, and will produce a play `w`:
 ```
     w = learner.update(t, times_fb, losses_fb, hint)
 ```
 
 These losses and hints should be provided to the the learner. For ease of use, the library defines the
-`Environemnt` and `Hinter` abstract classes, that outline a standard interface for providing loss
+`Environment` and `Hinter` abstract classes, that outline a standard interface for providing loss
 functions and hints to the learner respecitvely.
 
 An example of online learning for subseasonal climate forecasting, as presented in [CITE] can 

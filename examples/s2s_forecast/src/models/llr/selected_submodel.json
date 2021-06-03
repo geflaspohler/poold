@@ -9,7 +9,7 @@
     {
         "train_years": "all",
         "margin_in_days": null,
-        "use_cfsv2": "True"
+        "use_cfsv2": "False"
     },
     "contest_tmp2m_34w": 
     {

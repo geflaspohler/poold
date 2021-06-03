@@ -30,6 +30,7 @@ class S2SHintEnvironment(Environment):
         # Call base class constructor
         super().__init__(times)
         self.models = models
+        self.d = len(models)
         self.gt_id = gt_id
         self.horizon = horizon
 
@@ -50,7 +51,7 @@ class S2SHintEnvironment(Environment):
         else:
             raise ValueError(f"Adative hinting is not implemented for algorithm {self.alg}.")
 
-    def get_feedback(self, t, os_times=None):
+    def get_losses(self, t, os_times=None):
         """ Get feedback avaliable at time t 
 
         Args:
@@ -73,19 +74,19 @@ class S2SHintEnvironment(Environment):
         os_targets = [self.date_to_target(d) for d in os_dates]
 
         # Get times with targets earlier than current prediction date
-        return [t for t, d in zip(os_times, os_targets) if d < date]
+        os_feedbacks = [t for t, d in zip(os_times, os_targets) if d < date]
+        os_losses = [self._get_loss(t) for t in os_feedbacks]
 
-    def get_loss(self, t):
+        # Return (time, feedback tuples)
+        return list(zip(os_feedbacks, os_losses))
+
+    def _get_loss(self, t):
         """ Get loss function at time t 
 
         Args:
             t (int): current time 
         """
-        try:
-            hist_fb = self.learner.get_history(t, remove=False)
-        except:
-            pdb.set_trace()
-            hist_fb = self.learner.get_history(t, remove=False)
+        hist_fb = self.learner.get_history(t, remove=False)
 
         assert(t in self.hint_matrix)
         H_t = self.hint_matrix[t]
@@ -97,12 +98,12 @@ class S2SHintEnvironment(Environment):
         if self.alg == "DORMPlus":
             loss = {
                 "fun": partial(self.hint_loss.loss, H=H_t, g_os=g_os, g=g, h=h, hp=hp),
-                "jac": partial(self.hint_loss.loss_gradient, H=H_t, g_os=g_os, g=g, h=h, hp=hp)
+                "jac": partial(self.hint_loss.loss_gradient, H=H_t, g_os=g_os, g=g, h=h, hp=hp),
             }
         else:
             loss = {
-                "fun": partial(self.hint_loss.loss, H=H_t, y=g_os, g=g),
-                "jac": partial(self.hint_loss.loss_gradient, H=H_t, y=g_os, g=g)
+                "fun": partial(self.hint_loss.loss, H=H_t, g_os=g_os, g=g),
+                "jac": partial(self.hint_loss.loss_gradient, H=H_t, g_os=g_os, g=g),
             }
         return loss
 
@@ -126,7 +127,7 @@ class HintingLossODAFTRL(object):
         else:
             raise ValueError(f"Gradients for {q}-norm not implemented. Use q = 2 or infty")
 
-    def loss(self, H, y, g, w):
+    def loss(self, H, g_os, g, w):
         """Computes the hint loss location w. 
 
         Args:
@@ -135,7 +136,7 @@ class HintingLossODAFTRL(object):
            g (np.array) - d x 1 vector of gradient at time t
            w: n x 1 np.array - omega weight play of hinter
         """
-        return np.linalg.norm(g, ord=self.q) * np.linalg.norm(y - H @ w, ord=self.q)
+        return np.linalg.norm(g, ord=self.q) * np.linalg.norm(g_os - H @ w, ord=self.q)
     
     def loss_gradient(self, H, g_os, g, w):
         """Computes the gradient of the hint loss location w. 

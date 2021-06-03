@@ -32,7 +32,6 @@ class S2SHinter(Hinter):
             loss_regret:
             regret_hints (bool): if True, provide regret vector hints. Else, provide
                 gradient vector hints
-            partition:
             hz_hints (bool):  Let h_{i, j} indicate hinter j's hint for delay period i.
                 If False, each column of hint matrix contains a sum of hints 
                 over delay period for a specific hinter,
@@ -119,12 +118,15 @@ class S2SHinter(Hinter):
         # Populate hint matrix
         for t_os in os_times:
             assert(t_os <= self.s2s_env.T)
+            # print("Getting hint for", t_os)
             date_os = self.s2s_env.times[t_os]
             target_os = self.date_to_target(date_os)
             target_os_str = datetime.strftime(target_os, '%Y%m%d')      
 
             offset = target_os - date # get target date offset 
+            # print("Offset", offset)
             hint_type = self.get_hint_type(offset)
+            # print("Hint type", hint_type)
 
             # Get matrix index for this hint type 
             if not self.hz_hints:
@@ -134,10 +136,11 @@ class S2SHinter(Hinter):
 
             for hinter in self.hinters[hint_type]:
                 # Get hint from correct hinter
-                hint = hinter.get_hint(t_os, regret=self.regret_hints, partition=self.partition)
+                hint = hinter.get_hint(t_os, regret=self.regret_hints, loss_regret=self.loss_regret)
 
                 # Add hint to hint column in matrix 
                 hint_matrix[:, n_i] +=  hint['g']
+                # print("Hint value:", hint)
                 n_i += 1
 
         return hint_matrix 
@@ -219,18 +222,20 @@ class S2SHinter(Hinter):
             raise ValueError(f"Unrecognized hint type {hint_type}")
         return hinter
 
-    def update_hint_data(self, t_fb): 
+    def update_hint_data(self, t, times_fb): 
         ''' Update each hinter with recieved feedback 
         
         Args:
-            t_fb (int): feedback time
+            t (int): current time
+            times_fb (list[int]): list of feedback times
         '''
-        y_fb = self.s2s_env.get_gt(t_fb)
-        g_fb = self.s2s_history.get_grad(t_fb)
+        for t_fb in times_fb:
+            y_fb = self.s2s_env.get_gt(t)
+            g_fb = self.s2s_history.get_grad(t_fb)
 
-        for horizon_hints in self.hinters.values():
-            for hinter in horizon_hints:
-                hinter.update_hint_data(g_fb, y_fb)
+            for horizon_hints in self.hinters.values():
+                for hinter in horizon_hints:
+                    hinter.update_hint_data(g_fb, y_fb)
 
     def reset_hint_data(self): 
         ''' Reset each hinters hint data '''
@@ -284,7 +289,7 @@ class Hinter(ABC):
 
         self.reset_hint_data() # initialize the hint data
 
-    def get_hint(self, t, regret=False, partition=None): 
+    def get_hint(self, t, regret=False, loss_regret=None): 
         """ Gets the multi-day hint for the current expert
 
         Args:
@@ -301,7 +306,11 @@ class Hinter(ABC):
 
         if regret: 
             # Return instantaneous regret
-            hint = self.loss_regret(g_tilde, w, partition)
+            try:
+                hint = self.loss_regret(g=g_tilde, w=w)
+            except:
+                pdb.set_trace()
+                hint = self.loss_regret(g=g_tilde, w=w)
         else:
             # Return loss gradient
             hint = g_tilde       
@@ -371,17 +380,10 @@ class HorizonForecast(Hinter):
         date_str = datetime.strftime(self.s2s_env.time_to_target(t), '%Y%m%d')  
 
         # Get names of submodel forecast files using the selected submodel
-        try:
-            fname = get_forecast_filename(model=self.model, 
-                                        gt_id=self.gt_id,
-                                        horizon=self.horizon,
-                                        target_date_str=date_str)
-        except:
-            pdb.set_trace()
-            fname = get_forecast_filename(model=self.model, 
-                                        gt_id=self.gt_id,
-                                        horizon=self.horizon,
-                                        target_date_str=date_str)
+        fname = get_forecast_filename(model=self.model, 
+                                    gt_id=self.gt_id,
+                                    horizon=self.horizon,
+                                    target_date_str=date_str)
         if not os.path.exists(fname):
             printf(f"Warning: No {self.model} forecast for horizon {self.horizon} on date {date_str}") 
             return np.zeros((self.d,))
