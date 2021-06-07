@@ -48,7 +48,7 @@ class OnlineLearner(ABC):
         self.T = T # algorithm horizon
 
         # Set up expert models
-        self.expert_models = model_list
+        self.expert_models = copy.deepcopy(model_list)
         self.d = len(self.expert_models) # number of experts
 
         # Initialize partition of weight vector into simplices
@@ -59,7 +59,7 @@ class OnlineLearner(ABC):
         self.partition_keys = list(set(self.partition))
 
         # Create online learning history 
-        self.history = History(model_list, T)
+        self.history = History(model_list)
 
         # Oustanding losses 
         self.outstanding = set() 
@@ -82,7 +82,7 @@ class OnlineLearner(ABC):
         """ Returns current algorithm parameters as a dictionary. """
         pass
 
-    def update_and_play(self, t, losses_fb, hint):
+    def update_and_play(self, losses_fb, hint):
         """ Update online learner and generate a new play.
         
         Update weight vector with received feedback
@@ -90,7 +90,6 @@ class OnlineLearner(ABC):
         play for time t.
         
         Args:
-            t (int): current time
             losses_fb (list[(int, loss)]): list of 
                 (feedback time, loss_feedback) tuples
             hint (dict): hint dictionary of the form:
@@ -101,11 +100,12 @@ class OnlineLearner(ABC):
                 }
                 for the hint pseudoloss at time self.t 
         """
+        # pdb.set_trace()
         # Add to set missing feedback
-        self.outstanding.add(t)
+        self.outstanding.add(self.t)
 
         # Update the history with received losses
-        self.history.record_losses(t, losses_fb)
+        self.history.record_losses(self.t, losses_fb)
 
         # Get hint from input 
         if hint is None:
@@ -130,10 +130,10 @@ class OnlineLearner(ABC):
         params = self.get_params()
 
         # Update play history 
-        self.history.record_play(t, self.w)
-        self.history.record_hint(t, self.h)
-        self.history.record_params(t, params)
-        self.history.record_os(t, self.outstanding)
+        self.history.record_play(self.t, self.w)
+        self.history.record_hint(self.t, self.h)
+        self.history.record_params(self.t, params)
+        self.history.record_os(self.t, self.outstanding)
 
         # Update algorithm iteration 
         self.t += 1
@@ -159,7 +159,8 @@ class OnlineLearner(ABC):
 
     def log_params(self, t):
         """ Return dictionary of algorithm parameters """
-        params = {'t': t} + self.get_params()
+        params = self.get_params()
+        params['t'] = t
         # Log model weights
         for i in range(self.d):
             params[f"model_{self.expert_models[i]}"] = float(self.w[i])
@@ -173,10 +174,9 @@ class OnlineLearner(ABC):
         """
         # Record keeping 
         self.outstanding = set() # currently outstanding feedback
-        self.history.reset(self.t)
 
         # Reset algorithm duration
-        self.t = 0 # current algorithm time
+        # self.t = 0 # current algorithm time
         self.T = T # algorithm duration 
         self.h = np.zeros((self.d,)) # last provided hint vector 
 
@@ -228,17 +228,16 @@ class OnlineLearner(ABC):
         ''' Returns dictionary of expert model names and current weights '''
         return dict(zip(self.expert_models, self.w))
 
-    def get_outstanding(self, t, include=True):
-        """ Gets outstanding predictions at time t 
+    def get_outstanding(self, include=True):
+        """ Gets outstanding predictions at time self.t
 
         Args: 
-            t (int): a time 
             include (bool): if True, include current time
                 t in oustanding set
         """
         # Add t to oustanding if not already present
         if include: 
-            self.outstanding.add(t)
+            self.outstanding.add(self.t)
         return list(self.outstanding)
 
 class AdaHedgeD(OnlineLearner):

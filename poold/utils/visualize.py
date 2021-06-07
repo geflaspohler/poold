@@ -32,26 +32,29 @@ def visualize(history, time_labels=None, model_labels={}):
     Args:
         history (History): online learning History object
     """
-    assert(len(time_labels) == history.T)
+    times = history.get_times()
     if time_labels is None:
-        time_labels = range(history.T)
+        time_labels = range(len(times))
+    assert(len(time_labels) == len(times))
 
     df_losses = pd.DataFrame(columns=history.models+["online_learner"], index=time_labels)
     df_weights = pd.DataFrame(columns=history.models, index=time_labels)
 
-    for  t in range(history.T):
-        try:
-            loss_obj, loss_learner, loss_grad  = history.get_loss(t)
-            play_learner = history.get_play(t, return_past=False)
-        except AssertionError as e:
-            continue
+    for t, time in enumerate(times):
+        loss_obj, loss_learner, loss_grad  = history.get_loss(time)
+        play_learner = history.get_play(time, return_past=False)
 
         loss_all = loss_obj.get('exp', {})
         loss_all['online_learner'] = loss_learner
 
         # Assign loss and weight dataframe 
-        df_losses.iloc[t] = loss_all
-        df_weights.iloc[t] = dict(zip(history.models, play_learner))
+        try:
+            df_losses.iloc[t] = loss_all
+            df_weights.iloc[t] = dict(zip(history.models, play_learner))
+        except:
+            pdb.set_trace()
+            df_losses.iloc[t] = loss_all
+            df_weights.iloc[t] = dict(zip(history.models, play_learner))
 
     plot_weights(df_weights, model_labels)
 

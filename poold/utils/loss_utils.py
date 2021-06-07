@@ -1,4 +1,5 @@
 import numpy as np
+import copy
 
 def loss_regret(g, w, partition):
     ''' Computes the loss regret w.r.t. a partition of the 
@@ -33,13 +34,14 @@ def normalize_by_partition(w, partition):
             model_list[2] for the second task,
             model_list[3:] for the third task
     """
+    wout = np.zeros(w.shape)
     partition_keys = list(set(partition))
     for k in partition_keys:     
         p_ind = (partition == k)                             
         if np.sum(w[p_ind]) > 0.0:
-            w[p_ind] = (w[p_ind]/ np.sum(w[p_ind]))
+            wout[p_ind] = (w[p_ind]/ np.sum(w[p_ind]))
         else: 
             n_k = sum(p_ind)
-            w[p_ind] = 1./n_k * np.ones(n_k,) # Uniform
-    return w
+            wout[p_ind] = 1./n_k * np.ones(n_k,) # Uniform
+    return wout
     

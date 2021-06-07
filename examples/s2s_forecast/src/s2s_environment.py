@@ -65,6 +65,7 @@ class S2SEnvironment(Environment):
 
         date = self.times[t]
         date_str = datetime.strftime(date, '%Y%m%d')
+        print("Target:", self.date_to_target(date))
 
         # Outstanding prediction dates
         os_dates = [self.times[t] for t in os_times]
@@ -237,13 +238,13 @@ class S2SEnvironment(Environment):
                 target_date_str=target_str)
 
         if not os.path.exists(fname):
-            raise ValueError("No forecast found for model {model} on target {target}.")
+            raise ValueError(f"No forecast found for model {model} on target {target}.")
 
         df = pd.read_hdf(fname).rename(columns={"pred": f"{model}"})
 
         # If any of expert predictions are NaN
         if df.isna().any(axis=None): 
-            raise ValueError("NaNs in forecast for model {model} on target {target}.")
+            raise ValueError(f"NaNs in forecast for model {model} on target {target}.")
 
         # Important to sort in order to ensure lat/lon points are in consistant order 
         df = df.set_index(['start_date', 'lat', 'lon']).squeeze().sort_index()   
