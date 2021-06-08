@@ -32,7 +32,7 @@ learn_to_hint = True
 hz_hints = False
 hint_alg = "dormplus"
 # constant_hint = ["prev_g"]
-constant_hint = ["mean_g", "prev_g", "trend_y"]
+constant_hint = ["None", "prev_g", "mean_g"]
 regret_hints = False if alg == "adahedged" else True
 
 # Set alias for online learner
@@ -81,9 +81,9 @@ if hz_hints:
 else:
     horizon_hints = {"default": constant_hint}  
     n_hints = [sum(len(x) for x in horizon_hints)]
-    hint_models = ["h" + str(i) + "_" + "".join(item) \
+    hint_models = ["h_" + "".join(item) \
         for i, item in enumerate(horizon_hints["default"])]
-    hint_partition = [i for i, sublist in enumerate(horizon_hints["default"])]
+    hint_partition = [0 for i, sublist in enumerate(horizon_hints["default"])]
 
 # Set up hinter (produces hints for delay period)
 s2s_hinter = S2SHinter(
