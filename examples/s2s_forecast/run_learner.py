@@ -47,8 +47,8 @@ dates = [t - start_delta for t in targets] # forecast issuance dates
 T = len(dates) # algorithm duration 
 
 # Online learning algorithm 
-partition = None
-learner = create(alg, model_list=models, partition=partition, T=26)
+= None
+learner = create(alg, model_list=models, groups=groups, T=26)
 
 # Subseasonal forecasting environment
 s2s_env = S2SEnvironment(dates, models, gt_id=gt_id, horizon=horizon)

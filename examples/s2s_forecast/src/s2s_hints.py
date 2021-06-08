@@ -18,7 +18,7 @@ from src.utils.general_util import tic, toc, printf, make_directories, symlink
 import pdb 
 
 class S2SHinter(Hinter):
-    def __init__(self, hint_types, gt_id, horizon, learner, environment, hint_partition, regret_hints=False, hz_hints=False): 
+    def __init__(self, hint_types, gt_id, horizon, learner, environment, hint_groups, regret_hints=False, hz_hints=False): 
         """ Initialize hinter for S2S environment.
 
         Args:
@@ -35,7 +35,7 @@ class S2SHinter(Hinter):
                 If False, each column of hint matrix contains a sum of hints 
                 over delay period for a specific hinter,
                     e.g., [h_{0, 0} + h_{1, 0} + h_{2, 0} | h_{0, 1} + h_{2, 1} | h_{2, 2} ]
-                If True, the hint matrix is partitioned by delay horizon,
+                If True, the hint matrix is grouped by delay horizon,
                     e.g,. [h_{0, 0}, h_{0, 1} | h_{1, 0} | h_{2, 0}, h_{2, 1}, h_{2, 2}]
         """
         self.d = learner.d

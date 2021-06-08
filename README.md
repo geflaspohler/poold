@@ -8,7 +8,7 @@ library is the learners module. Learners can be instantiated using the `create` 
 ```
 import poold
 model_list = ["model1", "model2"]
-learner, history = poold.create(learner="dormplus", model_list=model_list, partition=None, T=None)
+learner, history = poold.create(learner="dormplus", model_list=model_list, groups=None, T=None)
 ```
 This method initializes an online learning and online learning `History` object, that performs the
 record keeping of plays and losses observed during online learning. 

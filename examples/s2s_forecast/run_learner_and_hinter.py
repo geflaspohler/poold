@@ -57,10 +57,10 @@ start_delta = timedelta(days=get_start_delta(horizon, gt_id)) # difference betwe
 dates = [t - start_delta for t in targets] # forecast issuance dates
 T = len(dates) # algorithm duration 
 
-partition = None
+groups = None
 
 # Online learning algorithm 
-learner = create(alg, model_list=models, partition=partition, T=26)
+learner = create(alg, model_list=models, groups=groups, T=26)
 
 # Subseasonal forecasting environment
 s2s_env = S2SEnvironment(dates, models, gt_id=gt_id, horizon=horizon)
@@ -76,19 +76,19 @@ if hz_hints:
     hint_models = ["h" + str(i) + "_" + "".join(item) \
         for i, sublist in enumerate(horizon_hints.values()) \
             for item in sublist]
-    hint_partition = [i for i, sublist in enumerate(horizon_hints.values()) \
+    hint_groups = [i for i, sublist in enumerate(horizon_hints.values()) \
         for item in sublist]
 else:
     horizon_hints = {"default": constant_hint}  
     n_hints = [sum(len(x) for x in horizon_hints)]
     hint_models = ["h_" + "".join(item) \
         for i, item in enumerate(horizon_hints["default"])]
-    hint_partition = [0 for i, sublist in enumerate(horizon_hints["default"])]
+    hint_groups = [0 for i, sublist in enumerate(horizon_hints["default"])]
 
 # Set up hinter (produces hints for delay period)
 s2s_hinter = S2SHinter(
     hint_types=horizon_hints, gt_id=gt_id, horizon=horizon, learner=learner, 
-    environment=s2s_env, hint_partition=hint_partition, regret_hints=regret_hints, 
+    environment=s2s_env, hint_groups=hint_groups, regret_hints=regret_hints, 
     hz_hints=hz_hints)
 
 # Set up hint environment (manages losses and ground truth for hinter) 
@@ -97,7 +97,7 @@ s2s_hint_env = S2SHintEnvironment(
 
 # Create hint learner
 if learn_to_hint:
-    hint_learner = create(hint_alg, model_list=hint_models, partition=hint_partition, T=26)
+    hint_learner = create(hint_alg, model_list=hint_models, groups=hint_groups, T=26)
 
 # Iterate through algorithm times
 for t in range(T):

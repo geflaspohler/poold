@@ -23,25 +23,26 @@ import numpy as np
 import pandas as pd
 import copy
 
-from ..utils import loss_regret, normalize_by_partition
+from ..utils import loss_regret, normalize_by_groups
 from ..utils import History
 
 import pdb # TODO: delete this import
 
 class OnlineLearner(ABC):
     """ OnlineLearner abstract base class. """    
-    def __init__(self, model_list, partition=None, T=None, **kwargs):
+    def __init__(self, model_list, groups=None, T=None, **kwargs):
         """Initialize online learner. 
         Args:
             model_list (list[str]): list of strings indicating 
                 expert model names
                 e.g., ["doy", "cfsv2"]
-            partition (list[int]): mask partitioning learners 
-                for different tasks into separate simplicies,
-                e.g., np.array([1, 1, 2, 3, 3]) means to use
-                model_list[0:2] for the first task,
-                model_list[2] for the second task,
-                model_list[3:] for the third task
+            groups (numpy.array): mask grouping learners for different 
+                delay periods into separate simpilces,
+                e.g., np.array([1, 1, 2, 3, 3]) 
+                corresponds to models[0:2] playing on one simplex,
+                models[2] playing on another, and models[3:] playing 
+                on the final simplex. Ususally set to None to perform
+                single-simplex hinting.
             T (int): > 0, algorithm duration, optional
         """                
         self.t = 0 # current algorithm time
@@ -51,12 +52,12 @@ class OnlineLearner(ABC):
         self.expert_models = copy.deepcopy(model_list)
         self.d = len(self.expert_models) # number of experts
 
-        # Initialize partition of weight vector into simplices
-        if partition is not None:
-            self.partition = np.array(partition)
+        # Initialize groups of weight vector into simplices
+        if groups is not None:
+            self.groups = np.array(groups)
         else:
-            self.partition = np.ones(len(self.expert_models),)
-        self.partition_keys = list(set(self.partition))
+            self.groups = np.ones(len(self.expert_models),)
+        self.group_keys = list(set(self.groups))
 
         # Create online learning history 
         self.history = History(model_list, default_play=self.init_weights())
@@ -79,7 +80,7 @@ class OnlineLearner(ABC):
 
     @abstractmethod
     def get_params(self):
-        """ Returns current algorithm parameters as a dictionary. """
+        """ Returns current algorithm hyperparmeters as a dictionary. """
         pass
 
     def update_and_play(self, losses_fb, hint):
@@ -180,7 +181,7 @@ class OnlineLearner(ABC):
         self.T = T # algorithm duration 
         self.h = np.zeros((self.d,)) # last provided hint vector 
 
-    def softmin_by_partition(self, theta, lam):
+    def softmin_by_groups(self, theta, lam):
         """ Return a vector w corresponding to a softmin of
         vector theta with temperature parameter lam
 
@@ -191,10 +192,10 @@ class OnlineLearner(ABC):
         # Initialize weight vector
         w = np.zeros((self.d,))
 
-        # Iterate through partitions
-        for k in self.partition_keys:     
-            # Get partition subset
-            p_ind = (self.partition == k)                             
+        # Iterate through groupss
+        for k in self.group_keys:     
+            # Get groups subset
+            p_ind = (self.groups == k)                             
             theta_sub = theta[p_ind]
             w_sub = w[p_ind]
 
@@ -221,7 +222,7 @@ class OnlineLearner(ABC):
     def init_weights(self):
         """ Returns uniform initialization weight vector. """          
         w =  np.ones(self.d) / self.d
-        w = normalize_by_partition(w, self.partition)
+        w = normalize_by_groups(w, self.groups)
         return w
     
     def get_weights(self):
@@ -242,10 +243,12 @@ class OnlineLearner(ABC):
 
 class AdaHedgeD(OnlineLearner):
     """
-    AdaHedgeD module implements delayed AdaHedge 
-    online learning algorithm.
+    AdaHedgeD module implements delayed AdaHedge and DUB 
+    online learning algorithms of Flaspohler et al., "Online 
+    Learning with Optimism and Delay" as ODAFTRL on the simplex 
+    with different regularization settings.
     """    
-    def __init__(self, model_list, partition=None, T=None, reg="adahedged"):
+    def __init__(self, model_list, groups=None, T=None, reg="adahedged"):
         """ Initializes online_expert 
 
         Args:
@@ -256,7 +259,7 @@ class AdaHedgeD(OnlineLearner):
             Other args defined in OnlineLearner base class.
         """                
         # Base class constructor 
-        super().__init__(model_list, partition, T)
+        super().__init__(model_list, groups, T)
 
         # Check and store regulraization 
         supported_reg = ["adahedged", "dub"]
@@ -268,7 +271,7 @@ class AdaHedgeD(OnlineLearner):
         self.reset_params(T)
 
     def get_params(self):
-        """ Returns current algorithm parameters as a dictionary. """
+        """ Returns current algorithm hyperparmeters as a dictionary. """
         return { 
             'lam': self.lam,
             'delta': self.delta,
@@ -309,7 +312,7 @@ class AdaHedgeD(OnlineLearner):
         """
         # Hint only update
         if t_fb is None:
-            self.w = self.softmin_by_partition(self.theta + hint, self.lam)
+            self.w = self.softmin_by_groups(self.theta + hint, self.lam)
             return
 
         # Get feedback gradient
@@ -333,7 +336,7 @@ class AdaHedgeD(OnlineLearner):
             raise ValueError(f"Unrecognized regularizer {self.reg}")
 
         # Update expert weights 
-        self.w = self.softmin_by_partition(self.theta + hint, self.lam)
+        self.w = self.softmin_by_groups(self.theta + hint, self.lam)
 
     def get_reg(self, g_fb, w_fb, hint_fb, g_os, lam_fb):
         """ Returns an updated AdaHedgeD-style regularizer
@@ -360,7 +363,7 @@ class AdaHedgeD(OnlineLearner):
         """
         # Compute the Be-The-Regularized-Leader Solution using
         # \lam_{t-D} and g_{1:t-D}
-        w_btrl = self.softmin_by_partition(self.theta, lam_fb)
+        w_btrl = self.softmin_by_groups(self.theta, lam_fb)
 
         # Compute drift delta
         delta_drift = np.dot(g_fb, w_fb - w_btrl)
@@ -430,22 +433,23 @@ class AdaHedgeD(OnlineLearner):
 class DORM(OnlineLearner):
     """
     DORM module implements delayed optimistc regret matching 
-    online learning algorithm.
+    online learning algorithm of Flaspohler et al., "Online 
+    Learning with Optimism and Delay" with q=2.
     """    
-    def __init__(self, model_list, partition=None, T=None):
+    def __init__(self, model_list, groups=None, T=None):
         """ Initializes online_expert 
 
         Args:
             Args defined in OnlineLearner base class.
         """                
         # Base class constructor 
-        super().__init__(model_list, partition, T)
+        super().__init__(model_list, groups, T)
 
         #  Initialize learner
         self.reset_params(T)
 
     def get_params(self):
-        """ Returns current algorithm parameters as a dictionary. """
+        """ Returns current algorithm hyperparmeters as a dictionary. """
         return {}
 
     def reset_params(self, T):
@@ -477,7 +481,7 @@ class DORM(OnlineLearner):
         # Hint only update
         if t_fb is None:
             regret_pos = np.maximum(0, hint)
-            self.w = normalize_by_partition(regret_pos, self.partition)
+            self.w = normalize_by_groups(regret_pos, self.groups)
             return 
 
         # Update dual-space parameter value with standard 
@@ -488,7 +492,7 @@ class DORM(OnlineLearner):
         w_fb = fb["w"] # get feedback play 
         print("g_fb:", g_fb)
         print("w_fb:", w_fb)
-        regret_fb = loss_regret(g_fb, w_fb, self.partition) # compute regret w.r.t. partition 
+        regret_fb = loss_regret(g_fb, w_fb, self.groups) # compute regret w.r.t. groups 
         print("r_fb:", regret_fb)
         self.regret = self.regret + regret_fb 
         print("regret:", self.regret)
@@ -499,29 +503,30 @@ class DORM(OnlineLearner):
         print("regret pos:", regret_pos)
 
         # Update expert weights 
-        self.w = normalize_by_partition(regret_pos, self.partition)
+        self.w = normalize_by_groups(regret_pos, self.groups)
         print("w:", self.w)
         # pdb.set_trace()
 
 class DORMPlus(OnlineLearner):
     """
     DORMPlus module implements delayed optimistc regret matching+
-    online learning algorithm.
+    online learning algorithm of Flaspohler et al., "Online 
+    Learning with Optimism and Delay" with q=2.
     """    
-    def __init__(self, model_list, partition=None, T=None):
+    def __init__(self, model_list, groups=None, T=None):
         """ Initializes online_expert 
 
         Args:
             Args defined in OnlineLearner base class.
         """                
         # Base class constructor 
-        super().__init__(model_list, partition, T)
+        super().__init__(model_list, groups, T)
 
         #  Initialize learner
         self.reset_params(T)
 
     def get_params(self):
-        """ Returns current algorithm parameters as a dictionary. """
+        """ Returns current algorithm hyperparmeters as a dictionary. """
         return {}
 
     def reset_params(self, T):
@@ -551,7 +556,7 @@ class DORMPlus(OnlineLearner):
         # Hint only update
         if t_fb is None:
             self.p = np.maximum(0, self.p + hint - self.hint_prev)
-            self.w = normalize_by_partition(self.p, self.partition)
+            self.w = normalize_by_groups(self.p, self.groups)
             self.hint_prev = copy.deepcopy(hint)
             return 
 
@@ -561,13 +566,13 @@ class DORMPlus(OnlineLearner):
         assert("g" in fb)
         w_fb = fb["w"]
         g_fb = fb["g"]
-        regret_fb = loss_regret(g_fb, w_fb, self.partition) # compute regret w.r.t. partition 
+        regret_fb = loss_regret(g_fb, w_fb, self.groups) # compute regret w.r.t. groups 
 
         # Update psuedo-play 
         self.p = np.maximum(0, self.p + regret_fb + hint - self.hint_prev)
 
         # Update expert weights 
-        self.w = normalize_by_partition(self.p, self.partition) 
+        self.w = normalize_by_groups(self.p, self.groups) 
 
         # Update previous hint
         self.hint_prev = copy.deepcopy(hint)
