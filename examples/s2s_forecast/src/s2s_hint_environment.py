@@ -51,16 +51,20 @@ class S2SHintEnvironment(Environment):
         else:
             raise ValueError(f"Adative hinting is not implemented for algorithm {self.alg}.")
 
-    def get_losses(self, t, os_times=None):
-        """ Get feedback avaliable at time t 
+    def get_losses(self, t, os_times=None, override=False):
+        """ Get loss functions avaliable at time t 
 
         Args:
-            t (int): current time
+            t (int): current time 
             os_times (list[int]): list of times with outstanding forecasts
                 if None, os_times = [t]
-        """
-        assert(t <= self.T)
+            override (bool): if True, return losses for all os_times,
+                ignoring data availability 
 
+        Returns: A dictionary containing the loss as a function of play w,
+        the loss gradient as a function of play w, and a dictionary of 
+        expert losses at time t.
+        """
         if os_times is None:
             os_times = range(0, self.T)
 
@@ -74,7 +78,11 @@ class S2SHintEnvironment(Environment):
         os_targets = [self.date_to_target(d) for d in os_dates]
 
         # Get times with targets earlier than current prediction date
-        os_feedbacks = [t for t, d in zip(os_times, os_targets) if d < date]
+        if not override:
+            os_feedbacks = [t for t, d in zip(os_times, os_targets) if d < date]
+        else:
+            os_feedbacks = [t for t, d in zip(os_times, os_targets)]
+
         os_losses = [self._get_loss(t) for t in os_feedbacks]
 
         # Return (time, feedback tuples)
@@ -86,8 +94,7 @@ class S2SHintEnvironment(Environment):
         Args:
             t (int): current time 
         """
-        hist_fb = self.learner.get_history(t, remove=False)
-
+        hist_fb = self.learner.history.get(t)
         assert(t in self.hint_matrix)
         H_t = self.hint_matrix[t]
         g_os = hist_fb['g_os']
@@ -98,12 +105,12 @@ class S2SHintEnvironment(Environment):
         if self.alg == "DORMPlus":
             loss = {
                 "fun": partial(self.hint_loss.loss, H=H_t, g_os=g_os, g=g, h=h, hp=hp),
-                "jac": partial(self.hint_loss.loss_gradient, H=H_t, g_os=g_os, g=g, h=h, hp=hp),
+                "grad": partial(self.hint_loss.loss_gradient, H=H_t, g_os=g_os, g=g, h=h, hp=hp),
             }
         else:
             loss = {
                 "fun": partial(self.hint_loss.loss, H=H_t, g_os=g_os, g=g),
-                "jac": partial(self.hint_loss.loss_gradient, H=H_t, g_os=g_os, g=g),
+                "grad": partial(self.hint_loss.loss_gradient, H=H_t, g_os=g_os, g=g),
             }
         return loss
 

@@ -14,7 +14,7 @@ import numpy as np
 import pdb
 
 class History(object):
-    def __init__(self, models, low_memory=False):
+    def __init__(self, models, default_play, low_memory=False):
         """ Online leanring history object.
 
         Args:
@@ -23,7 +23,7 @@ class History(object):
         """
         self.models = models
         self.d = len(models)
-        # self.learner_base_time = 0 # learner base time
+        self.default_play = default_play
 
         self.play_history = {} # history of past algorithm plays
         self.loss_history = {} # history of past observed loss objects
@@ -48,16 +48,20 @@ class History(object):
         """
         self.play_history[t] = copy.copy(w)
 
-    def record_losses(self, t, losses_fb):
+    def record_losses(self, losses_fb, verbose=False):
         """ Record the received loss at time t.
 
         Args:
-            t: a time representation 
             losses_fb: list of (time, loss objects) tuples
         """
         for t_fb, loss_fb in losses_fb:
             # t_fb += self.learner_base_time
             assert(t_fb in self.play_history)
+            if t_fb in self.grad_history:
+                if verbose:
+                    print(f"Warning: time {t_fb} is already in gradient history and won't be recomputed.")
+                continue
+
             if not self.low_memory:
                 self.loss_history[t_fb] = copy.deepcopy(loss_fb)
             self.grad_history[t_fb] = loss_fb['grad'](w=self.play_history[t_fb])
@@ -155,10 +159,9 @@ class History(object):
         will return the play at t-1 if the play at time t 
         is not yet available.  
         """
-        # t += self.learner_base_time
         # Initial value before the first play
         if t == 0 and t not in self.play_history:
-            raise ValueError(f"Play {t} not yet in play history.")
+            return copy.deepcopy(self.default_play)
 
         # If past play is in history, return most recent play
         if t not in self.play_history and return_past:

@@ -1,5 +1,6 @@
 import numpy as np
 import copy
+import pdb
 
 def loss_regret(g, w, partition):
     ''' Computes the loss regret w.r.t. a partition of the 

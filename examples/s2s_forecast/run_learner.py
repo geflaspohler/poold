@@ -48,7 +48,6 @@ T = len(dates) # algorithm duration
 
 # Online learning algorithm 
 partition = None
-# learner = create(alg, model_list=models, partition=partition, T=T)
 learner = create(alg, model_list=models, partition=partition, T=26)
 
 # Subseasonal forecasting environment

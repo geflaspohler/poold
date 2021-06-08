@@ -59,7 +59,7 @@ class OnlineLearner(ABC):
         self.partition_keys = list(set(self.partition))
 
         # Create online learning history 
-        self.history = History(model_list)
+        self.history = History(model_list, default_play=self.init_weights())
 
         # Oustanding losses 
         self.outstanding = set() 
@@ -105,7 +105,7 @@ class OnlineLearner(ABC):
         self.outstanding.add(self.t)
 
         # Update the history with received losses
-        self.history.record_losses(self.t, losses_fb)
+        self.history.record_losses(losses_fb)
 
         # Get hint from input 
         if hint is None:
@@ -567,4 +567,7 @@ class DORMPlus(OnlineLearner):
         self.p = np.maximum(0, self.p + regret_fb + hint - self.hint_prev)
 
         # Update expert weights 
-        self.w = normalize_by_partition(self.p, self.partition)
+        self.w = normalize_by_partition(self.p, self.partition) 
+
+        # Update previous hint
+        self.hint_prev = copy.deepcopy(hint)
