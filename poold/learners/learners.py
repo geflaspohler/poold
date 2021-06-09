@@ -297,6 +297,7 @@ class AdaHedgeD(OnlineLearner):
         # Regularization parameters
         self.alpha = np.log(self.d) # alpha parameter
         self.at_max = 0.0 # running max of a_t terms for DUB
+        self.at_prev = [] # history of a_t terms
         self.delta = 0.0 # per-iteration increase in step size
         self.Delta = 0.0 # cummulative sum of a_t^2 + 2b_t terms for DUB
 
@@ -329,7 +330,7 @@ class AdaHedgeD(OnlineLearner):
                 g_fb, fb["w"], fb["h"],
                 fb["g_os"], fb["params"]["lam"])
         elif self.reg == "dub":
-            self.lam, self.delta  = self.get_reg_uniform(
+            self.lam, self.delta  = self.get_reg_dub(
                 g_fb, fb["w"], fb["h"],
                 fb["g_os"], fb["D"])
         else:
@@ -383,7 +384,7 @@ class AdaHedgeD(OnlineLearner):
         delta = max(min(delta_drift, delta_aux), 0.0)
         return delta
 
-    def get_reg_uniform(self, g_fb, w_fb, hint_fb, g_os, D):
+    def get_reg_dub(self, g_fb, w_fb, hint_fb, g_os, D):
         """ Delayed upper bound regularization value
             g_fb (numpy.array): most recent feedback gradient t-D
             hint_fb (numpy.array): hint at t-D
@@ -393,15 +394,19 @@ class AdaHedgeD(OnlineLearner):
         # Get a_t and b_t upper bounds
         a_t = self.get_at_bound(g_fb, hint_fb, g_os)
         b_t = self.get_bt_bound(g_fb, hint_fb, g_os)
+        # TODO: can modify this to a max length queue to avoid
+        # saving the entire history of a_ts
+        self.at_prev.append(copy.copy(a_t))
+        at_delay_sum = sum(self.at_prev[-D:])
 
         # Update max a_t term
-        self.at_max = np.max([self.at_max, a_t])
+        self.at_max = np.max([self.at_max, at_delay_sum])
 
         # Update delta term
         delta = a_t**2 + 2*b_t
         self.Delta += delta
 
-        eta = 2*D*self.at_max + np.sqrt(self.Delta)
+        eta = 2*self.at_max + np.sqrt(self.Delta)
 
         # Ensure monotonic increases
         return np.max([self.lam, eta]), delta 
@@ -477,7 +482,6 @@ class DORM(OnlineLearner):
                 feedback time
             hint (np.array): hint vector at time t
         """
-        print("time_fb:", t_fb)
         # Hint only update
         if t_fb is None:
             regret_pos = np.maximum(0, hint)
@@ -490,22 +494,14 @@ class DORM(OnlineLearner):
         assert("g" in fb)
         g_fb = fb['g'] # get feedback gradient
         w_fb = fb["w"] # get feedback play 
-        print("g_fb:", g_fb)
-        print("w_fb:", w_fb)
         regret_fb = loss_regret(g_fb, w_fb, self.groups) # compute regret w.r.t. groups 
-        print("r_fb:", regret_fb)
         self.regret = self.regret + regret_fb 
-        print("regret:", self.regret)
 
         # Update regret
-        print("hint:", hint)
         regret_pos = np.maximum(0, self.regret + hint)
-        print("regret pos:", regret_pos)
 
         # Update expert weights 
         self.w = normalize_by_groups(regret_pos, self.groups)
-        print("w:", self.w)
-        # pdb.set_trace()
 
 class DORMPlus(OnlineLearner):
     """

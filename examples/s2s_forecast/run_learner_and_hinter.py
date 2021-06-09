@@ -4,6 +4,8 @@ from functools import partial
 from datetime import datetime, timedelta
 import copy
 import pickle
+import matplotlib.pyplot as plt
+from argparse import ArgumentParser
 
 # Subseasonal forecasting imports
 from src.s2s_environment import S2SEnvironment 
@@ -11,7 +13,7 @@ from src.s2s_hints import S2SHinter
 from src.s2s_hint_environment import S2SHintEnvironment
 from src.utils.eval_util import get_target_dates
 from src.utils.experiments_util import get_start_delta
-from vis_params import *
+from vis_params import model_alias, alg_naming, style_algs
 
 # PoolD imports
 from poold import create
@@ -24,43 +26,66 @@ import pdb
 # Set print parameters
 np.set_printoptions(precision=3)
 
-# Learner parameters
-alg = "dormplus"
+# Parse command-line arguments
+parser = ArgumentParser()
+parser.add_argument("pos_vars", nargs="*")  # gt_id and horizon 
+
+parser.add_argument('--target_dates', '-t', default="std_contest_eval")
+parser.add_argument('--expert_models', '-m', default="tuned_catboost,tuned_cfsv2,tuned_doy,llr,multillr,tuned_salient_fri",
+                    help="Comma separated list of models e.g., 'doy,cfsv2,llr,multillr'")
+parser.add_argument('--reg', '-r', default="None",
+                    help="Regularization type, one of: 'None', 'dub', 'adahedged'")
+parser.add_argument('--alg', '-a', default="dormplus",
+                    help="Online learning algorithm. One of: 'dorm', dormplus', 'adahedged', 'dub'")
+parser.add_argument('--hint_alg', '-ha', default="None",
+                    help="Algorithm to use for hint learning. Set to None to not hint learning.")
+parser.add_argument('--hint', '-hi', default="None",
+                    help="Optimistic hint type. Comma separated list of hint types.")
+# parser.add_argument('--delay', '-d', default=0,
+#                     help='Delay parameter, number of experts to instantiate. String containting an integer >=0.')      
+args, opt = parser.parse_known_args()
+
+# Task parameters
+gt_id = args.pos_vars[0] # "contest_precip" or "contest_tmp2m"                                                                            
+horizon = args.pos_vars[1] # "34w" or "56w"    
+
+date_str = args.target_dates # target date object
+model_string = args.expert_models # string of expert prediction, comma separated
+reg = args.reg # algorithm regularization 
+alg = args.alg # algorithm 
+hint_alg = args.hint_alg # algorithm 
+hint_type = args.hint # type of optimistic hint
+# delay_param = int(args.delay) # delay parameter 
+
+# Perpare experts, sort model names, and get selected submodel for each
+models = model_string.split(',')
+models.sort()
+
+# Perpare experts, sort model names, and get selected submodel for each
+hint_options = hint_type.split(',')
+hint_options.sort()
 
 # Subseasonal forecasting hinter
-learn_to_hint = True 
+learn_to_hint = (hint_alg != "None")
 hz_hints = False
-hint_alg = "dormplus"
-# constant_hint = ["prev_g"]
-constant_hint = ["None", "prev_g", "mean_g"]
 regret_hints = False if alg == "adahedged" else True
 
 # Set alias for online learner
-model_alias["online_learner"] = f"{alg_naming[alg]}, Hint: {alg_naming[hint_alg] if learn_to_hint else constant_hint[0]}"
-
-# Task parameters
-horizon = "34w"
-gt_id = "contest_tmp2m"
-
-# Input models
-models = ["tuned_doy", "tuned_cfsv2", "tuned_salient_fri", "tuned_catboost", "multillr", "llr"]
-models.sort()
+model_alias["online_learner"] = f"{alg_naming[alg]}"
 
 # Forecast targets
-date_str = "std_contest_eval"
 targets = get_target_dates(date_str=date_str, horizon=horizon) # forecast target dates
-# targets = targets[340:370] # TODO: delete this
-targets = targets[-26:] # TODO: delete this
+# targets = targets[175:205] # TODO: delete this
+# targets = targets[-26:] # TODO: delete this
 targets_pred = copy.deepcopy(targets) # targets we successfully make forecasts for 
 
 start_delta = timedelta(days=get_start_delta(horizon, gt_id)) # difference between issuance + target
 dates = [t - start_delta for t in targets] # forecast issuance dates
 T = len(dates) # algorithm duration 
 
-groups = None
-
 # Online learning algorithm 
-learner = create(alg, model_list=models, groups=groups, T=26)
+learner = create(alg, model_list=models, groups=None, T=26)
+regret_periods = []
 
 # Subseasonal forecasting environment
 s2s_env = S2SEnvironment(dates, models, gt_id=gt_id, horizon=horizon)
@@ -79,7 +104,7 @@ if hz_hints:
     hint_groups = [i for i, sublist in enumerate(horizon_hints.values()) \
         for item in sublist]
 else:
-    horizon_hints = {"default": constant_hint}  
+    horizon_hints = {"default": hint_options}  
     n_hints = [sum(len(x) for x in horizon_hints)]
     hint_models = ["h_" + "".join(item) \
         for i, item in enumerate(horizon_hints["default"])]
@@ -99,10 +124,12 @@ s2s_hint_env = S2SHintEnvironment(
 if learn_to_hint:
     hint_learner = create(hint_alg, model_list=hint_models, groups=hint_groups, T=26)
 
+t_pred = 0 # number of successful predictions made
+period_start = 0 # start of regret period
+
 # Iterate through algorithm times
 for t in range(T):
     print("------ Starting round", t)
-
     if t % 26 == 0 and t != 0:
         # Get the remainder of the losses
         losses_fb = s2s_env.get_losses(
@@ -111,10 +138,16 @@ for t in range(T):
         learner.reset_params(T=26)
 
         #  Get the remainder of the hint losses
-        hint_losses_fb = s2s_hint_env.get_losses(
-            t, os_times=hint_learner.get_outstanding(include=False), override=True)
-        hint_learner.history.record_losses(hint_losses_fb)
-        hint_learner.reset_params(T=26)
+        s2s_hinter.reset_hint_data()
+        if learn_to_hint:
+            hint_losses_fb = s2s_hint_env.get_losses(
+                t, os_times=hint_learner.get_outstanding(include=False), override=True)
+            hint_learner.history.record_losses(hint_losses_fb)
+            hint_learner.reset_params(T=26)
+
+        # Record that start of a new regret period
+        regret_periods.append((period_start, t_pred))
+        period_start = t_pred
 
     # Check expert predictions
     pred = s2s_env.check_pred(t)
@@ -162,25 +195,30 @@ for t in range(T):
     if learn_to_hint:
         print(hint_learner.log_params(t))
 
-    # pdb.set_trace()
+    # Increment number of successful predictions
+    t_pred += 1
+
+# Update the final regret period
+regret_periods.append((period_start, t_pred))
 
 # Get the remainder of the losses
 losses_fb = s2s_env.get_losses(T-1, os_times=learner.get_outstanding(include=False), override=True)
 learner.history.record_losses(losses_fb)
 
-exp_string = f"{gt_id}_{horizon}_{date_str}_A{alg}_HL{hint_alg if learn_to_hint else constant_hint[0]}_HZ{hz_hints}"
+exp_string = f"{gt_id}_{horizon}_{date_str}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
 fl = open(f"learner_history_{exp_string}.pickle", "wb")
-pickle.dump([targets_pred, learner.history], fl)
+pickle.dump([targets_pred, regret_periods, model_alias, learner.history], fl)
 
-visualize(learner.history, targets_pred, model_alias)
+visualize(learner.history, regret_periods, targets_pred, model_alias, style_algs)
 
 if learn_to_hint:
     hint_losses_fb = s2s_hint_env.get_losses(T-1, os_times=learner.get_outstanding(include=False), override=True)
     hint_learner.history.record_losses(hint_losses_fb)
 
     fh = open(f"hinter_history_{exp_string}.pickle", "wb")
-    pickle.dump([targets_pred, hint_learner.history], fh)
+    pickle.dump([targets_pred, regret_periods, {}, hint_learner.history], fh)
 
     # Visualize history
-    pdb.set_trace()
-    visualize(hint_learner.history, targets_pred)
+    visualize(hint_learner.history, regret_periods, targets_pred)
+
+plt.show()

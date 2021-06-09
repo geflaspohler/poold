@@ -7,7 +7,7 @@ from functools import partial
 
 # PoolD imports
 from poold.hinters import Hinter
-from poold.utils import loss_regret, normalize_by_partition
+from poold.utils import loss_regret, normalize_by_groups
 
 # Custom subseasonal forecasting libraries 
 from src.utils.models_util import get_forecast_filename
@@ -45,9 +45,9 @@ class S2SHinter(Hinter):
         self.hz_hints = hz_hints
         self.environment = environment 
         self.learner = learner
-        self.partition = hint_partition 
+        self.groups = hint_groups 
         self.loss_gradient = self.environment.rodeo_loss.loss_gradient
-        self.loss_regret = partial(loss_regret, partition=self.learner.partition)
+        self.loss_regret = partial(loss_regret, groups=self.learner.groups)
 
         # Initialize hinting object
         self.init_hinter(hint_types)
@@ -71,7 +71,7 @@ class S2SHinter(Hinter):
 
         if self.hz_hints:
             om = np.ones((self.n, 1))  # uniform weights
-            om = normalize_by_partition(om, self.partition)
+            om = normalize_by_groups(om, self.groups)
         else:
             om = np.ones((self.n_single, 1)) / float(self.n_single) # uniform weights
 
@@ -105,7 +105,7 @@ class S2SHinter(Hinter):
             hint_matrix = np.zeros((self.d, self.n_single))      
 
         # Populate hint matrix
-        for t_os in os_times:
+        for i, t_os in enumerate(os_times):
             assert(t_os <= self.environment.T)
             # print("Getting hint for", t_os)
             date_os = self.environment.times[t_os]
@@ -122,12 +122,24 @@ class S2SHinter(Hinter):
             else:
                 n_i = self.i_h[hint_type] 
 
-            for hinter in self.hinters[hint_type]:
+            for j, hinter in enumerate(self.hinters[hint_type]):
                 # Get hint from correct hinter
                 hint = hinter.get_hint(t_os, regret=self.regret_hints, loss_regret=self.loss_regret)
 
+                hint_name = self.hint_names[hint_type][j]
                 # Add hint to hint column in matrix 
-                hint_matrix[:, n_i] +=  hint['g']
+                if "_future" in hint_name and i != 0:
+                    pass
+                elif "_past" in hint_name and i == 0:
+                    pass
+                elif "_double" in hint_name:
+                    hint_matrix[:, n_i] +=  2*hint['g']
+                elif "_triple" in hint_name:
+                    hint_matrix[:, n_i] +=  3*hint['g']
+                else:
+                    hint_matrix[:, n_i] +=  hint['g']
+
+
                 # print("Hint value:", hint)
                 n_i += 1
 
@@ -150,6 +162,7 @@ class S2SHinter(Hinter):
         self.n_h = {} # horizon-specific number of hinters
         self.i_h = {} # start index of hinters
         self.hinters = {} # hinter object
+        self.hint_names = {} # hinter name object
 
         # Initialize hinter objects
         for h, horizon_hints in hint_types.items():
@@ -160,8 +173,10 @@ class S2SHinter(Hinter):
             self.n += len(horizon_hints)
 
             self.hinters[h] = []
+            self.hint_names[h] = []
             for ht in horizon_hints:
                 self.hinters[h].append(self.get_single_hinter(ht))
+                self.hint_names[h].append(ht)
 
     def get_single_hinter(self, hint_type):
         """ Instantiate hinter according to hint_type 
@@ -200,8 +215,10 @@ class S2SHinter(Hinter):
             hinter = ExpertEnsemble(**kwargs, expert_weights=expert_weights)
         elif hint_type == "current_w":
             hinter = ExpertEnsemble(**kwargs)                                   
-        elif hint_type == "prev_g":
+        elif "prev_g_" in hint_type:
             hinter = PrevGrad(**kwargs)                                   
+        elif hint_type == "avg_prev_g":
+            hinter = AvgPrevGrad(**kwargs)                                   
         elif hint_type == "mean_g":
             hinter = MeanGrad(**kwargs)    
         elif hint_type == "None":
@@ -230,7 +247,7 @@ class S2SHinter(Hinter):
             g_fb = self.learner.history.get_grad(t_fb)
             for horizon_hints in self.hinters.values():
                 for hinter in horizon_hints:
-                    hinter.update_hint_data(g_fb, y_fb)
+                    hinter.update_hint_data(t_fb, g_fb, y_fb)
 
     def reset_hint_data(self): 
         ''' Reset each hinters hint data '''
@@ -290,7 +307,7 @@ class Hinter(ABC):
         Args:
            regret: If True provides hints in terms of instantaneous regrets for each expert.
                 If False, returns hints in terms of accumlated loss gradients.
-            partition: TODO
+            groups: TODO
         """     
         hint = np.zeros((self.d,)) 
         hint_data = {}
@@ -326,10 +343,11 @@ class Hinter(ABC):
         pass
 
     @abstractmethod
-    def update_hint_data(self, g_fb, y_fb): 
+    def update_hint_data(self, t_fb, g_fb, y_fb): 
         """ Abstract method: updates any meta-data necessary to compute a hint
 
         Args:
+            t_fb (int): time of feedback
             g_fb (np.array): feedback gradient received by the online learner
             y_fb (np.array): feedback ground truth 
         """     
@@ -345,7 +363,7 @@ class NoHint(Hinter):
     def __init__(self, d, loss_gradient, loss_regret, environment, learner):
         super().__init__(d, loss_gradient, loss_regret, environment, learner)
 
-    def update_hint_data(self, g_fb, y_fb): 
+    def update_hint_data(self, t_fb, g_fb, y_fb): 
         pass
 
     def reset_hint_data(self): 
@@ -364,7 +382,7 @@ class HorizonForecast(Hinter):
         self.horizon = horizon
         self.gt_id = gt_id
 
-    def update_hint_data(self, g_fb, y_fb): 
+    def update_hint_data(self, t_fb, g_fb, y_fb): 
         pass
 
     def reset_hint_data(self): 
@@ -400,7 +418,7 @@ class ExpertEnsemble(Hinter):
         super().__init__(d, loss_gradient, loss_regret, environment, learner)
         self.ew = expert_weights
 
-    def update_hint_data(self, g_fb, y_fb): 
+    def update_hint_data(self, t_fb, g_fb, y_fb): 
         pass
 
     def reset_hint_data(self): 
@@ -427,7 +445,7 @@ class PrevObs(Hinter):
         # Base constructor
         super().__init__(d, loss_gradient, loss_regret, environment, learner)
 
-    def update_hint_data(self, g_fb, y_fb): 
+    def update_hint_data(self, t_fb, g_fb, y_fb): 
         pass
 
     def reset_hint_data(self): 
@@ -448,7 +466,7 @@ class MeanObs(Hinter):
         # Base constructor
         super().__init__(d, loss_gradient, loss_regret, environment, learner)
 
-    def update_hint_data(self, g_fb, y_fb): 
+    def update_hint_data(self, t_fb, g_fb, y_fb): 
         if self.y_sum is None:
             self.y_sum = np.zeros(y_fb.shape)
         self.y_sum += y_fb
@@ -478,7 +496,7 @@ class TrendObs(Hinter):
         # Base constructor
         super().__init__(d, loss_gradient, loss_regret, environment, learner)
 
-    def update_hint_data(self, g_fb, y_fb): 
+    def update_hint_data(self, t_fb, g_fb, y_fb): 
         if len(self.y_prev) < 2:
             self.y_prev.append(y_fb)
         else:
@@ -507,7 +525,7 @@ class PrevGrad(Hinter):
         # Base constructor
         super().__init__(d, loss_gradient, loss_regret, environment, learner)
 
-    def update_hint_data(self, g_fb, y_fb): 
+    def update_hint_data(self, t_fb, g_fb, y_fb): 
         self.g_prev = g_fb
 
     def reset_hint_data(self): 
@@ -516,6 +534,22 @@ class PrevGrad(Hinter):
     def get_pseudo_grad(self, t): 
         # Get most recently available ground truth data
         return self.g_prev
+
+class AvgPrevGrad(Hinter):
+    ''' Returns most recently observed feedback gradient '''
+    def __init__(self, d, loss_gradient, loss_regret, environment, learner):
+        super().__init__(d, loss_gradient, loss_regret, environment, learner)
+        self.g_dict = {}
+
+    def update_hint_data(self, t_fb, g_fb, y_fb): 
+        self.g_dict[t_fb] = g_fb
+
+    def reset_hint_data(self): 
+        self.g_dict = {}
+
+    def get_pseudo_grad(self, t): 
+        # Get most recently available ground truth data
+        return self.g_dict.get(t, np.zeros((self.d)))
 
 class MeanGrad(Hinter):
     ''' Returns mean of previously observed feedback gradients '''
@@ -527,7 +561,7 @@ class MeanGrad(Hinter):
         self.g_sum = np.zeros((self.d,))
         self.g_len = 0
 
-    def update_hint_data(self, g_fb, y_fb): 
+    def update_hint_data(self, t_fb, g_fb, y_fb): 
         self.g_sum += g_fb
         self.g_len += 1
 

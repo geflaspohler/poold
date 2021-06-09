@@ -24,7 +24,7 @@ import pdb
 np.set_printoptions(precision=3)
 
 # Learner parameters
-alg = "dormplus"
+alg = "dub"
 
 # Set alias for online learner
 model_alias["online_learner"] = f"{alg_naming[alg]}"
@@ -47,8 +47,7 @@ dates = [t - start_delta for t in targets] # forecast issuance dates
 T = len(dates) # algorithm duration 
 
 # Online learning algorithm 
-= None
-learner = create(alg, model_list=models, groups=groups, T=26)
+learner = create(alg, model_list=models, groups=None, T=26)
 
 # Subseasonal forecasting environment
 s2s_env = S2SEnvironment(dates, models, gt_id=gt_id, horizon=horizon)
@@ -59,8 +58,9 @@ for t in range(T):
 
     if t % 26 == 0 and t != 0:
         # Get the remainder of the losses
-        losses_fb = s2s_env.get_losses(t, os_times=learner.get_outstanding(include=False), override=True)
-        learner.history.record_losses(t, losses_fb)
+        losses_fb = s2s_env.get_losses(
+            t, os_times=learner.get_outstanding(include=False), override=True)
+        learner.history.record_losses(losses_fb)
         learner.reset_params(T=26)
 
     # Check expert predictions
@@ -72,7 +72,8 @@ for t in range(T):
         continue 
 
     # Get available learner feedback
-    losses_fb = s2s_env.get_losses(t, os_times=learner.get_outstanding())
+    os_times = learner.get_outstanding()
+    losses_fb = s2s_env.get_losses(t, os_times=os_times)
 
     # Update learner with hint and feedback 
     w = learner.update_and_play(losses_fb, hint=None)
@@ -83,7 +84,8 @@ for t in range(T):
 
 # Get the remainder of the losses
 losses_fb = s2s_env.get_losses(T-1, os_times=learner.get_outstanding(include=False), override=True)
-learner.history.record_losses(T, losses_fb)
+learner.history.record_losses(losses_fb)
+
 
 exp_string = f"{gt_id}_{horizon}_{date_str}_A{alg}"
 fl = open(f"learner_history_{exp_string}.pickle", "wb")

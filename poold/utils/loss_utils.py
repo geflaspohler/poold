@@ -9,12 +9,13 @@ def loss_regret(g, w, groups):
     Args:
         g (np.array): gradient vector
         w (np.array): weight vector
-        groups (np.array): mask grouping learners 
-            for different tasks into separate simplicies,
-            e.g., np.array([1, 1, 2, 3, 3]) means to use
-            model_list[0:2] for the first task,
-            model_list[2] for the second task,
-            model_list[3:] for the third task
+        groups (numpy.array): mask grouping learners for different 
+            delay periods into separate simpilces,
+            e.g., np.array([1, 1, 2, 3, 3]) 
+            corresponds to models[0:2] playing on one simplex,
+            models[2] playing on another, and models[3:] playing 
+            on the final simplex. Ususally set to None to perform
+            single-simplex hinting.
     '''
     group_keys = list(set(groups))
     regret = np.zeros(g.shape)
@@ -28,12 +29,13 @@ def normalize_by_groups(w, groups):
 
     Args:
         w (np.array): weight vector 
-        groups (np.array): mask grouping learners 
-            for different tasks into separate simplicies,
-            e.g., np.array([1, 1, 2, 3, 3]) means to use
-            model_list[0:2] for the first task,
-            model_list[2] for the second task,
-            model_list[3:] for the third task
+        groups (numpy.array): mask grouping learners for different 
+            delay periods into separate simpilces,
+            e.g., np.array([1, 1, 2, 3, 3]) 
+            corresponds to models[0:2] playing on one simplex,
+            models[2] playing on another, and models[3:] playing 
+            on the final simplex. Ususally set to None to perform
+            single-simplex hinting.
     """
     wout = np.zeros(w.shape)
     group_keys = list(set(groups))
