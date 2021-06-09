@@ -1,7 +1,8 @@
-from .learners import AdaHedgeD, DORM, DORMPlus
+from .learners import AdaHedgeD, DORM, DORMPlus, ReplicatedOnlineLearner
 
 __all__ = [
     "AdaHedgeD",
     "DORM",
-    "DORMPlus"
+    "DORMPlus",
+    "ReplicatedOnlineLearner",
 ]

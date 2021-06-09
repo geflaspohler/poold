@@ -138,9 +138,6 @@ class S2SHinter(Hinter):
                     hint_matrix[:, n_i] +=  3*hint['g']
                 else:
                     hint_matrix[:, n_i] +=  hint['g']
-
-
-                # print("Hint value:", hint)
                 n_i += 1
 
         return hint_matrix 
@@ -215,6 +212,8 @@ class S2SHinter(Hinter):
             hinter = ExpertEnsemble(**kwargs, expert_weights=expert_weights)
         elif hint_type == "current_w":
             hinter = ExpertEnsemble(**kwargs)                                   
+        elif "prev_g" in hint_type:
+            hinter = PrevGrad(**kwargs)                                   
         elif "prev_g_" in hint_type:
             hinter = PrevGrad(**kwargs)                                   
         elif hint_type == "avg_prev_g":
@@ -239,7 +238,7 @@ class S2SHinter(Hinter):
                 times with loss feedback.
         '''
         # Update learner history
-        self.learner.history.record_losses(losses_fb)
+        self.learner.record_losses(losses_fb)
 
         # Compute observations and gradients for hinters
         for t_fb, loss_fb in losses_fb:
@@ -571,3 +570,54 @@ class MeanGrad(Hinter):
             return self.g_sum 
         return self.g_sum / self.g_len
 
+class ReplicatedS2SHinter(object):
+    """ Replicated Hinter class """
+    def __init__(self, hinter, replicates=1): 
+        self.base_hinter = copy.deepcopy(hinter) 
+        self.hinter_queue = [copy.deepcopy(hinter) for i in range(replicates)]
+        # Ensure that hinters maintain a reference to the learner object
+        for i in range(replicates):
+            self.hinter_queue[i].learner = hinter.learner
+        self.reps = replicates
+
+    def get_hint(self, t, os_times):
+        """ Get hint at time t.
+
+        Args:
+            t (int): current time
+            os_times (list[int]): list of outstanding 
+                feedback times
+
+        Returns: hint dictionary object
+        """
+        return self.hinter_queue[t % self.reps].get_hint(t, os_times)
+
+    def get_hint_matrix(self, t, os_times):
+        """ Get hint matrix at time t.
+
+        Args:
+            t (int): current time
+            os_times (list[int]): list of outstanding 
+                feedback times
+
+        Returns: hint object
+        """
+        return self.hinter_queue[t % self.reps].get_hint_matrix(t, os_times)
+
+    def update_hint_data(self, t, losses_fb): 
+        ''' Update each hinter with recieved feedback 
+        
+        Args:
+            t (int): current time
+            losses_fb (list[(int, dict)]): list of 
+                (feedback time, loss object) tuples
+            os_times (set[int]): set of outstanding feedback
+                times. Will be modified in place to remove
+                times with loss feedback.
+        '''
+        return self.hinter_queue[t % self.reps].update_hint_data(t, losses_fb)
+
+    def reset_hint_data(self): 
+        ''' Reset each hinters hint data '''
+        for i in range(self.reps):
+            self.hinter_queue[i].reset_hint_data()

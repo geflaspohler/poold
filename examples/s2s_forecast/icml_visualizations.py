@@ -18,7 +18,8 @@ fl = [
     "learner_history_contest_tmp2m_34w_std_contest_eval_Adorm_HLprev_g.pickle",
     "learner_history_contest_tmp2m_34w_std_contest_eval_Aadahedged_HLprev_g.pickle",
     "learner_history_contest_tmp2m_34w_std_contest_eval_Adub_HLprev_g.pickle",
-    "learner_history_contest_tmp2m_34w_std_contest_eval_Adormplus_HLavg_prev_g.pickle"
+    "learner_history_contest_tmp2m_34w_std_contest_eval_Adormplus_HLavg_prev_g.pickle",
+    "learner_history_contest_tmp2m_34w_std_contest_eval_Adormplus_HLprev_g_future.pickle"
 ]
 
 experiment_list = []

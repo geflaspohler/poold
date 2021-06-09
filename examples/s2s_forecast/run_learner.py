@@ -23,19 +23,37 @@ import pdb
 # Set print parameters
 np.set_printoptions(precision=3)
 
-# Learner parameters
-alg = "dub"
+# Parse command-line arguments
+parser = ArgumentParser()
+parser.add_argument("pos_vars", nargs="*")  # gt_id and horizon 
+
+parser.add_argument('--target_dates', '-t', default="std_contest_eval")
+parser.add_argument('--expert_models', '-m', default="tuned_catboost,tuned_cfsv2,tuned_doy,llr,multillr,tuned_salient_fri",
+                    help="Comma separated list of models e.g., 'doy,cfsv2,llr,multillr'")
+parser.add_argument('--reg', '-r', default="None",
+                    help="Regularization type, one of: 'None', 'dub', 'adahedged'")
+parser.add_argument('--alg', '-a', default="dormplus",
+                    help="Online learning algorithm. One of: 'dorm', dormplus', 'adahedged', 'dub'")
+# parser.add_argument('--delay', '-d', default=0,
+#                     help='Delay parameter, number of experts to instantiate. String containting an integer >=0.')      
+args, opt = parser.parse_known_args()
+
+# Task parameters
+gt_id = args.pos_vars[0] # "contest_precip" or "contest_tmp2m"                                                                            
+horizon = args.pos_vars[1] # "34w" or "56w"    
+
+date_str = args.target_dates # target date object
+model_string = args.expert_models # string of expert prediction, comma separated
+reg = args.reg # algorithm regularization 
+alg = args.alg # algorithm 
+# delay_param = int(args.delay) # delay parameter 
+
+# Perpare experts, sort model names, and get selected submodel for each
+models = model_string.split(',')
+models.sort()
 
 # Set alias for online learner
 model_alias["online_learner"] = f"{alg_naming[alg]}"
-
-# Task parameters
-horizon = "34w"
-gt_id = "contest_tmp2m"
-
-# Input models
-models = ["tuned_doy", "tuned_cfsv2", "tuned_salient_fri", "tuned_catboost", "multillr", "llr"]
-models.sort()
 
 # Forecast targets
 date_str = "std_contest_eval"
@@ -88,7 +106,7 @@ learner.history.record_losses(losses_fb)
 
 
 exp_string = f"{gt_id}_{horizon}_{date_str}_A{alg}"
-fl = open(f"learner_history_{exp_string}.pickle", "wb")
+fl = open(f"experiments/learner_history_{exp_string}.pickle", "wb")
 pickle.dump([targets_pred, learner.history], fl)
 
 # Visualize history

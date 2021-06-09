@@ -41,7 +41,7 @@ class S2SHintEnvironment(Environment):
         self.start_delta = timedelta(days=get_start_delta(horizon, gt_id))
 
         # Rodeo loss object
-        self.alg = type(self.learner).__name__
+        self.alg = self.learner.alg
         if self.alg == "AdaHedgeD":
             self.hint_loss = HintingLossODAFTRL(q=np.inf) 
         elif self.alg == "DORM":

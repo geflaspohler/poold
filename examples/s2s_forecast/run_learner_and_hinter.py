@@ -9,7 +9,7 @@ from argparse import ArgumentParser
 
 # Subseasonal forecasting imports
 from src.s2s_environment import S2SEnvironment 
-from src.s2s_hints import S2SHinter
+from src.s2s_hints import S2SHinter, ReplicatedS2SHinter
 from src.s2s_hint_environment import S2SHintEnvironment
 from src.utils.eval_util import get_target_dates
 from src.utils.experiments_util import get_start_delta
@@ -19,6 +19,7 @@ from vis_params import model_alias, alg_naming, style_algs
 from poold import create
 from poold.utils import loss_regret
 from poold.utils import visualize
+from poold.learners import ReplicatedOnlineLearner 
 
 #TODO: remove this import
 import pdb
@@ -41,8 +42,8 @@ parser.add_argument('--hint_alg', '-ha', default="None",
                     help="Algorithm to use for hint learning. Set to None to not hint learning.")
 parser.add_argument('--hint', '-hi', default="None",
                     help="Optimistic hint type. Comma separated list of hint types.")
-# parser.add_argument('--delay', '-d', default=0,
-#                     help='Delay parameter, number of experts to instantiate. String containting an integer >=0.')      
+parser.add_argument('--replicates', '-re', default=1,
+                    help="Number of online learning replicates.")
 args, opt = parser.parse_known_args()
 
 # Task parameters
@@ -55,7 +56,7 @@ reg = args.reg # algorithm regularization
 alg = args.alg # algorithm 
 hint_alg = args.hint_alg # algorithm 
 hint_type = args.hint # type of optimistic hint
-# delay_param = int(args.delay) # delay parameter 
+reps = int(args.replicates) # number of replicated experts
 
 # Perpare experts, sort model names, and get selected submodel for each
 models = model_string.split(',')
@@ -76,15 +77,18 @@ model_alias["online_learner"] = f"{alg_naming[alg]}"
 # Forecast targets
 targets = get_target_dates(date_str=date_str, horizon=horizon) # forecast target dates
 # targets = targets[175:205] # TODO: delete this
-# targets = targets[-26:] # TODO: delete this
+targets = targets[-26:] # TODO: delete this
 targets_pred = copy.deepcopy(targets) # targets we successfully make forecasts for 
+period_length = 26 # yearly regret periods/resetting
 
 start_delta = timedelta(days=get_start_delta(horizon, gt_id)) # difference between issuance + target
 dates = [t - start_delta for t in targets] # forecast issuance dates
 T = len(dates) # algorithm duration 
 
 # Online learning algorithm 
-learner = create(alg, model_list=models, groups=None, T=26)
+learner = create(alg, model_list=models, groups=None, T=period_length)
+if reps > 1:
+    learner = ReplicatedOnlineLearner(learner, replicates=reps)
 regret_periods = []
 
 # Subseasonal forecasting environment
@@ -115,6 +119,8 @@ s2s_hinter = S2SHinter(
     hint_types=horizon_hints, gt_id=gt_id, horizon=horizon, learner=learner, 
     environment=s2s_env, hint_groups=hint_groups, regret_hints=regret_hints, 
     hz_hints=hz_hints)
+if reps > 1:
+    s2s_hinter = ReplicatedS2SHinter(s2s_hinter, replicates=reps)
 
 # Set up hint environment (manages losses and ground truth for hinter) 
 s2s_hint_env = S2SHintEnvironment(
@@ -122,28 +128,30 @@ s2s_hint_env = S2SHintEnvironment(
 
 # Create hint learner
 if learn_to_hint:
-    hint_learner = create(hint_alg, model_list=hint_models, groups=hint_groups, T=26)
+    hint_learner = create(hint_alg, model_list=hint_models, groups=hint_groups, T=period_length)
+    if reps > 1:
+        hint_learner = ReplicatedOnlineLearner(hint_learner, replicates=reps)
 
 t_pred = 0 # number of successful predictions made
 period_start = 0 # start of regret period
 
 # Iterate through algorithm times
 for t in range(T):
-    print("------ Starting round", t)
-    if t % 26 == 0 and t != 0:
+    print(" >>> Starting round", t)
+    if t % period_length == 0 and t != 0:
         # Get the remainder of the losses
         losses_fb = s2s_env.get_losses(
-            t, os_times=learner.get_outstanding(include=False), override=True)
+            t, os_times=learner.get_outstanding(include=False, all_learners=True), override=True)
         learner.history.record_losses(losses_fb)
-        learner.reset_params(T=26)
+        learner.reset_params(T=period_length)
 
         #  Get the remainder of the hint losses
         s2s_hinter.reset_hint_data()
         if learn_to_hint:
             hint_losses_fb = s2s_hint_env.get_losses(
-                t, os_times=hint_learner.get_outstanding(include=False), override=True)
+                t, os_times=hint_learner.get_outstanding(include=False, all_learners=True), override=True)
             hint_learner.history.record_losses(hint_losses_fb)
-            hint_learner.reset_params(T=26)
+            hint_learner.reset_params(T=period_length)
 
         # Record that start of a new regret period
         regret_periods.append((period_start, t_pred))
@@ -154,7 +162,7 @@ for t in range(T):
     if pred is False:
         print(f"Missing expert predictions for round {t}.")
         del targets_pred[t]
-        learner.t += 1 # increment learner as well
+        learner.increment_time() # increment learner as well
         continue 
 
     # Get available learner feedback
@@ -186,7 +194,6 @@ for t in range(T):
         # Create hint
         h = s2s_hinter.get_hint(t, hint_os_times)
 
-    print("Hint:", h['grad'](learner.w))
     # Update learner with hint and feedback 
     w = learner.update_and_play(losses_fb, hint=h)
 
@@ -202,20 +209,23 @@ for t in range(T):
 regret_periods.append((period_start, t_pred))
 
 # Get the remainder of the losses
-losses_fb = s2s_env.get_losses(T-1, os_times=learner.get_outstanding(include=False), override=True)
+losses_fb = s2s_env.get_losses(
+    T-1, 
+    os_times=learner.get_outstanding(include=False, all_learners=True), 
+    override=True)
 learner.history.record_losses(losses_fb)
 
 exp_string = f"{gt_id}_{horizon}_{date_str}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
-fl = open(f"learner_history_{exp_string}.pickle", "wb")
+fl = open(f"experiments/learner_history_{exp_string}.pickle", "wb")
 pickle.dump([targets_pred, regret_periods, model_alias, learner.history], fl)
 
 visualize(learner.history, regret_periods, targets_pred, model_alias, style_algs)
 
 if learn_to_hint:
-    hint_losses_fb = s2s_hint_env.get_losses(T-1, os_times=learner.get_outstanding(include=False), override=True)
+    hint_losses_fb = s2s_hint_env.get_losses(T-1, os_times=learner.get_outstanding(include=False, all_learners=True), override=True)
     hint_learner.history.record_losses(hint_losses_fb)
 
-    fh = open(f"hinter_history_{exp_string}.pickle", "wb")
+    fh = open(f"experiments/hinter_history_{exp_string}.pickle", "wb")
     pickle.dump([targets_pred, regret_periods, {}, hint_learner.history], fh)
 
     # Visualize history

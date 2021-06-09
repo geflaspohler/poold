@@ -160,7 +160,7 @@ class History(object):
         is not yet available.  
         """
         # Initial value before the first play
-        if t == 0 and t not in self.play_history:
+        if len(self.play_history) == 0:
             return copy.deepcopy(self.default_play)
 
         # If past play is in history, return most recent play

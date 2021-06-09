@@ -47,6 +47,7 @@ class OnlineLearner(ABC):
         """                
         self.t = 0 # current algorithm time
         self.T = T # algorithm horizon
+        self.alg = "online_learner"
 
         # Set up expert models
         self.expert_models = copy.deepcopy(model_list)
@@ -82,6 +83,10 @@ class OnlineLearner(ABC):
     def get_params(self):
         """ Returns current algorithm hyperparmeters as a dictionary. """
         pass
+
+    def record_losses(self, losses_fb):
+        """ Record losses """
+        self.history.record_losses(losses_fb)
 
     def update_and_play(self, losses_fb, hint):
         """ Update online learner and generate a new play.
@@ -216,7 +221,6 @@ class OnlineLearner(ABC):
         # Check computation 
         if np.isnan(w).any():
             raise ValueError(f"Update produced NaNs: {w}")
-
         return w
 
     def init_weights(self):
@@ -229,7 +233,7 @@ class OnlineLearner(ABC):
         ''' Returns dictionary of expert model names and current weights '''
         return dict(zip(self.expert_models, self.w))
 
-    def get_outstanding(self, include=True):
+    def get_outstanding(self, include=True, **kwargs):
         """ Gets outstanding predictions at time self.t
 
         Args: 
@@ -240,6 +244,10 @@ class OnlineLearner(ABC):
         if include: 
             self.outstanding.add(self.t)
         return list(self.outstanding)
+
+    def increment_time(self):
+        """ Increment learner time """
+        self.t += 1
 
 class AdaHedgeD(OnlineLearner):
     """
@@ -260,6 +268,7 @@ class AdaHedgeD(OnlineLearner):
         """                
         # Base class constructor 
         super().__init__(model_list, groups, T)
+        self.alg = "AdaHedgeD"
 
         # Check and store regulraization 
         supported_reg = ["adahedged", "dub"]
@@ -449,6 +458,7 @@ class DORM(OnlineLearner):
         """                
         # Base class constructor 
         super().__init__(model_list, groups, T)
+        self.alg = "DORM"
 
         #  Initialize learner
         self.reset_params(T)
@@ -517,6 +527,7 @@ class DORMPlus(OnlineLearner):
         """                
         # Base class constructor 
         super().__init__(model_list, groups, T)
+        self.alg = "DORMPlus"
 
         #  Initialize learner
         self.reset_params(T)
@@ -572,3 +583,122 @@ class DORMPlus(OnlineLearner):
 
         # Update previous hint
         self.hint_prev = copy.deepcopy(hint)
+
+class ReplicatedOnlineLearner(object):
+    """ ReplicatedOnlineLearner class. """    
+    def __init__(self, learner, replicates=1):
+        """Initialize online learner. 
+        Args:
+            learner (OnlineLearner): an online learning object
+            replicates (int): number of replicates
+        """              
+        self.base_learner = copy.deepcopy(learner) 
+        self.learner_queue = [copy.deepcopy(learner) for i in range(replicates)]
+        self.t = 0 # current algorithm time
+        self.d = self.base_learner.d
+        self.groups = self.base_learner.groups
+        self.reps = replicates
+        self.alg = self.base_learner.alg
+
+        # Create online learning history 
+        self.history = History(learner.expert_models, default_play=learner.init_weights())
+
+    def get_params(self, t):
+        """ Returns current algorithm hyperparmeters as a dictionary. """
+        return self.learner_queue[t % self.reps].get_params()
+
+    def update_and_play(self, losses_fb, hint):
+        """ Update online learner and generate a new play.
+        
+        Update weight vector with received feedback
+        and any available hints. Update history and return 
+        play for time t.
+        
+        Args:
+            losses_fb (list[(int, loss)]): list of 
+                (feedback time, loss_feedback) tuples
+            hint (dict): hint dictionary of the form:
+                {
+                    "fun" (callable, optional): function handle for 
+                        the hint as a function of play w
+                    "grad" (callable): pseudo-gradient vector.
+                }
+                for the hint pseudoloss at time self.t 
+        """
+        # Update the history with received losses
+        self.history.record_losses(losses_fb)
+
+        w = self.learner_queue[self.t % self.reps].update_and_play(losses_fb, hint)
+
+        # Get algorithm parameters
+        params = self.learner_queue[self.t % self.reps].get_params()
+
+        # Update play history 
+        self.history.record_play(self.t, w)
+        self.history.record_params(self.t, params)
+
+        # Increment time for the rest of the learners 
+        for i, learner in enumerate(self.learner_queue):
+            if i != self.t % self.reps:
+                learner.t += 1
+        self.t += 1
+        # Update algorithm iteration 
+        return w
+
+    def log_params(self, t):
+        """ Return dictionary of algorithm parameters """
+        learner = self.learner_queue[t % self.reps]
+        params = learner.get_params()
+        params['t'] = t
+        # Log model weights
+        for i in range(self.d):
+            params[f"model_{learner.expert_models[i]}"] = float(learner.w[i])
+        return params
+
+    def reset_params(self, T):
+        """ Resets algorithm parameters for new duration T. 
+        
+        Args:
+            T (int): > 0, duration
+        """
+        for i in range(self.reps):
+            self.learner_queue[i].reset_params(T)
+
+    def increment_time(self):
+        """ Increment learner time """
+        self.t += 1
+        for i in range(self.reps):
+            self.learner_queue[i].increment_time()
+
+    def record_losses(self, losses_fb):
+        """ Record losses """
+        try:
+            self.history.record_losses(losses_fb)
+            self.learner_queue[self.t % self.reps].record_losses(losses_fb)
+        except:
+            pdb.set_trace()
+            self.history.record_losses(losses_fb)
+            self.learner_queue[self.t % self.reps].record_losses(losses_fb)
+
+    def get_outstanding(self, include=True, all_learners=False):
+        """ Gets outstanding predictions at time self.t
+
+        Args: 
+            include (bool): if True, include current time
+                t in oustanding set
+        """
+        # Add t to oustanding if not already present
+        learner = self.learner_queue[self.t % self.reps]
+        if include: 
+            learner.outstanding.add(self.t)
+
+        # Get either current learner outstanding set or
+        # oustanding set from all learners
+        outstanding = set()
+        if all_learners:
+            for i in range(self.reps):
+                outstanding = outstanding.union(self.learner_queue[i].outstanding)
+        else:
+            outstanding = learner.outstanding
+
+        return list(outstanding)
