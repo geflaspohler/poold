@@ -34,8 +34,8 @@ def visualize_multiple(experiment_list, style_algs, subset_time=None, filename="
     fig_r, ax_r = plt.subplots(1, 1, figsize=(10, 4), sharex=False)
     fig_p, ax_p = plt.subplots(1, 1, figsize=(5, 4), sharex=False)
     fig_w, ax_w = plt.subplots(1, num_plots, figsize=(4*num_plots, 4), sharex=False)
-    gs1 = gridspec.GridSpec(1, num_plots)
-    gs1.update(wspace=0.025, hspace=0.05) # set the spacing between axes.
+    # gs1 = gridspec.GridSpec(1, num_plots)
+    # gs1.update(wspace=0.025, hspace=0.05) # set the spacing between axes.
 
     df_losses = None
     for i, (targets, regret_periods, model_alias, history) in enumerate(experiment_list):
@@ -151,6 +151,8 @@ def plot_weights(df, regret_periods, model_labels, style_algs, ax=None, legend=T
         ax.legend(handles, labels,  prop={'size': 15}, ncol=1, loc='best')
     else:
         ax.set_yticks([])
+    ticks = ax.get_xticks()
+    # ax.set_xticks(ticks[0:-1])
 
     if subset_time is not None:
         # Date based formatting
@@ -214,12 +216,17 @@ def plot_params(df, regret_periods, model_alias, style_algs, ax=None, subset_tim
         label = f"{model_alias}" + "\t ($\lambda_{T}$ = " + f"{final_val: .3f})"
         ax.plot(df.index, df[m], label=label, **style)
 
+    ticks = ax.get_xticks()
+    # ticks[-1] = ticks[-2]
+    ax.set_xticks(ticks)
+
     ax.set_title("Regularization $\lambda_t$")
 
     handles, labels = ax.get_legend_handles_labels()
     # sort both labels and handles by labels
     labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0]))
     ax.legend(handles, labels,  prop={'size': 15}, ncol=1, loc='best')
+
 
     plot_time_seperators(regret_periods, df.index, ax)
 

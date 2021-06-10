@@ -67,7 +67,7 @@ hint_options.sort()
 # Subseasonal forecasting hinter
 learn_to_hint = (hint_alg != "None")
 if learn_to_hint:
-    hint_options = ["None", "prev_g", "mean_g"]
+    hint_options = ["None", "prev_g", "mean_g", "avg_prev_g"]
     hint_options.sort()
 hz_hints = False
 regret_hints = False if alg == "adahedged" else True
