@@ -6,15 +6,13 @@ import os
 from itertools import product
 import pandas as pd
 
-from vis_params import model_alias, alg_naming, style_algs
+# S2S imports
+from src.s2s_vis_params import model_alias, alg_naming, style_algs, task_dict
 
 # PoolD imports
 from poold import create
 from poold.utils import loss_regret
 from poold.utils import visualize, visualize_multiple
-
-#TODO: remove this import
-import pdb
 
 task_dict = {
     "contest_precip_34w": "Precip. 3-4w",

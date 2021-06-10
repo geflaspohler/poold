@@ -14,7 +14,7 @@ from src.s2s_hints import S2SHinter, ReplicatedS2SHinter
 from src.s2s_hint_environment import S2SHintEnvironment
 from src.utils.eval_util import get_target_dates
 from src.utils.experiments_util import get_start_delta
-from vis_params import model_alias, alg_naming, style_algs
+from src.s2s_vis_params import model_alias, alg_naming, style_algs
 
 # PoolD imports
 from poold import create
