@@ -1,9 +1,8 @@
 
 ## Subseasonal Climate Forecasting Example
-==============================
-Download the data and model forecast files from http://w3.impa.br/~pauloo/subseasonal_forecasting/code.zip.
+1. Download the data and model forecast files from http://w3.impa.br/~pauloo/subseasonal_forecasting/code.zip.
 
-Unzip the `data` and `models` directories and place in `examples/s2s_forecast` directory.
+2. Unzip the `data` and `models` directories and place in `examples/s2s_forecast` directory.
 
 To run the example code:
 ```
