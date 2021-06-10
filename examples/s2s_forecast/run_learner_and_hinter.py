@@ -54,6 +54,7 @@ alg = args.alg # algorithm
 hint_alg = args.hint_alg # algorithm 
 hint_type = args.hint # type of optimistic hint
 reps = int(args.replicates) # number of replicated experts
+visualize = args.visualize
 
 # Perpare experts, sort model names, and get selected submodel for each
 models = model_string.split(',')
