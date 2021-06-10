@@ -6,6 +6,7 @@ import copy
 import pickle
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
+import os
 
 # Subseasonal forecasting imports
 from src.s2s_environment import S2SEnvironment 
@@ -34,8 +35,6 @@ parser.add_argument("pos_vars", nargs="*")  # gt_id and horizon
 parser.add_argument('--target_dates', '-t', default="std_contest_eval")
 parser.add_argument('--expert_models', '-m', default="tuned_catboost,tuned_cfsv2,tuned_doy,llr,multillr,tuned_salient_fri",
                     help="Comma separated list of models e.g., 'doy,cfsv2,llr,multillr'")
-parser.add_argument('--reg', '-r', default="None",
-                    help="Regularization type, one of: 'None', 'dub', 'adahedged'")
 parser.add_argument('--alg', '-a', default="dormplus",
                     help="Online learning algorithm. One of: 'dorm', dormplus', 'adahedged', 'dub'")
 parser.add_argument('--hint_alg', '-ha', default="None",
@@ -52,7 +51,6 @@ horizon = args.pos_vars[1] # "34w" or "56w"
 
 date_str = args.target_dates # target date object
 model_string = args.expert_models # string of expert prediction, comma separated
-reg = args.reg # algorithm regularization 
 alg = args.alg # algorithm 
 hint_alg = args.hint_alg # algorithm 
 hint_type = args.hint # type of optimistic hint
@@ -68,16 +66,29 @@ hint_options.sort()
 
 # Subseasonal forecasting hinter
 learn_to_hint = (hint_alg != "None")
+if learn_to_hint:
+    hint_options = ["None", "prev_g", "mean_g"]
+    hint_options.sort()
 hz_hints = False
 regret_hints = False if alg == "adahedged" else True
 
 # Set alias for online learner
 model_alias["online_learner"] = f"{alg_naming[alg]}"
 
+# exp_string = f"{gt_id}_{horizon}_{date_str}{"" if reps == 1 else ("_R" + str(reps))}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
+if reps == 1:
+    exp_string = f"{gt_id}_{horizon}_{date_str}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
+else:
+    exp_string = f"{gt_id}_{horizon}_{date_str}_R{reps}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
+
+save_file = f"experiments/learner_history_{exp_string}.pickle"
+if os.path.exists(save_file):
+    exit(0)
+
 # Forecast targets
 targets = get_target_dates(date_str=date_str, horizon=horizon) # forecast target dates
 # targets = targets[175:205] # TODO: delete this
-targets = targets[-26:] # TODO: delete this
+# targets = targets[-26:] # TODO: delete this
 targets_pred = copy.deepcopy(targets) # targets we successfully make forecasts for 
 period_length = 26 # yearly regret periods/resetting
 
@@ -163,6 +174,8 @@ for t in range(T):
         print(f"Missing expert predictions for round {t}.")
         del targets_pred[t]
         learner.increment_time() # increment learner as well
+        if learn_to_hint:
+            hint_learner.increment_time() # increment learner as well
         continue 
 
     # Get available learner feedback
@@ -215,11 +228,14 @@ losses_fb = s2s_env.get_losses(
     override=True)
 learner.history.record_losses(losses_fb)
 
-exp_string = f"{gt_id}_{horizon}_{date_str}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
+if reps == 1:
+    exp_string = f"{gt_id}_{horizon}_{date_str}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
+else:
+    exp_string = f"{gt_id}_{horizon}_{date_str}_R{reps}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
 fl = open(f"experiments/learner_history_{exp_string}.pickle", "wb")
 pickle.dump([targets_pred, regret_periods, model_alias, learner.history], fl)
 
-visualize(learner.history, regret_periods, targets_pred, model_alias, style_algs)
+# visualize(learner.history, regret_periods, targets_pred, model_alias, style_algs)
 
 if learn_to_hint:
     hint_losses_fb = s2s_hint_env.get_losses(T-1, os_times=learner.get_outstanding(include=False, all_learners=True), override=True)
@@ -229,6 +245,6 @@ if learn_to_hint:
     pickle.dump([targets_pred, regret_periods, {}, hint_learner.history], fh)
 
     # Visualize history
-    visualize(hint_learner.history, regret_periods, targets_pred)
+    # visualize(hint_learner.history, regret_periods, targets_pred)
 
-plt.show()
+# plt.show()

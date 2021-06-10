@@ -7,11 +7,14 @@ For example:
 # System imports
 import numpy as np
 import pandas as pd
+import copy
+import os
 
 # Plotting imports
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib.gridspec as gridspec
 font = {'family' : 'lmodern',
         'weight' : 'normal',
         'size'   : 50}
@@ -26,14 +29,41 @@ sns.set_style("white")
 
 import pdb
 
-def visualize_multiple(experiment_list, style_algs, subset_time=None):
+def visualize_multiple(experiment_list, style_algs, subset_time=None, filename="temp"):
     num_plots = len(experiment_list)
-    fig_w, ax_w = plt.subplots(1, num_plots, figsize=(5*num_plots, 4), sharex=False)
-    fig_r, ax_r = plt.subplots(1, 1, figsize=(5, 4), sharex=False)
+    fig_r, ax_r = plt.subplots(1, 1, figsize=(10, 4), sharex=False)
     fig_p, ax_p = plt.subplots(1, 1, figsize=(5, 4), sharex=False)
+    fig_w, ax_w = plt.subplots(1, num_plots, figsize=(4*num_plots, 4), sharex=False)
+    gs1 = gridspec.GridSpec(1, num_plots)
+    gs1.update(wspace=0.025, hspace=0.05) # set the spacing between axes.
 
+    df_losses = None
     for i, (targets, regret_periods, model_alias, history) in enumerate(experiment_list):
-        visualize(history, regret_periods, targets, model_alias, style_algs, ax=[ax_w[i], ax_r, ax_p], subset_time=subset_time, legend=(i==0))
+        df = visualize(history, regret_periods, targets, model_alias, style_algs, ax=[ax_w[i], ax_r, ax_p], subset_time=subset_time, legend=(i==0))
+        if df_losses is None:
+            df_losses = copy.copy(df)
+        else:
+            df_losses = df_losses.merge(df)
+
+    mean_losses = df_losses.mean(axis=0)
+    # Save dataframe in latex table format
+    fname = f"./eval/losses_{filename}.tex"
+    mean_losses.to_latex(fname, float_format="%.3f", longtable=False)
+
+    fig_w.tight_layout()
+    fig_w.subplots_adjust(top=0.95, wspace=0, hspace=0)
+    fig_r.tight_layout()
+    fig_r.subplots_adjust(top=0.95)
+    fig_p.tight_layout()
+    fig_p.subplots_adjust(top=0.95)
+    filename_w = f"./figs/weights_{filename}.pdf"
+    filename_r = f"./figs/regret_{filename}.pdf"
+    filename_p = f"./figs/params_{filename}.pdf"
+    fig_w.savefig(filename_w, bbox_inches='tight')
+    fig_r.savefig(filename_r, bbox_inches='tight')
+    fig_p.savefig(filename_p, bbox_inches='tight')
+
+    return mean_losses
 
 def visualize(history, regret_periods=None, time_labels=None, model_labels={}, 
     style_algs={}, ax=[None, None, None], params=["lam"], subset_time=None, legend=True):
@@ -94,12 +124,14 @@ def visualize(history, regret_periods=None, time_labels=None, model_labels={},
         if df_params is not None:
             df_params.iloc[t] = params_learner
 
-    plot_weights(df_weights, regret_periods, model_labels, style_algs, ax[0], legend)
-    plot_regret(df_losses, regret_periods, model_labels, style_algs, history.models, ax[1], only_learner=True)
+    plot_weights(df_weights, regret_periods, model_labels, style_algs, ax[0], legend, subset_time)
+    plot_regret(df_losses, regret_periods, model_labels, style_algs, history.models, ax[1], only_learner=True, subset_time=subset_time)
     if df_params is not None:
-        plot_params(df_params, regret_periods, model_labels["online_learner"], style_algs, ax[2])
+        plot_params(df_params, regret_periods, model_labels["online_learner"], style_algs, ax[2], subset_time=subset_time)
 
-def plot_weights(df, regret_periods, model_labels, style_algs, ax=None, legend=True):
+    return df_losses.rename({"online_learner": model_labels["online_learner"]}, axis=1)
+
+def plot_weights(df, regret_periods, model_labels, style_algs, ax=None, legend=True, subset_time=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(5, 4), sharex=False)
 
@@ -116,16 +148,19 @@ def plot_weights(df, regret_periods, model_labels, style_algs, ax=None, legend=T
         handles, labels = ax.get_legend_handles_labels()
         # sort both labels and handles by labels
         labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0]))
-        ax.legend(handles, labels,  prop={'size': 12}, ncol=2, loc='best')
+        ax.legend(handles, labels,  prop={'size': 15}, ncol=1, loc='best')
+    else:
+        ax.set_yticks([])
 
-    # Date based formatting
-    # if isinstance(df.index, pd.DatetimeIndex):
-    #     datefmt = mdates.DateFormatter('%m-%d')
-    #     ax.xaxis.set_major_formatter(datefmt)
+    if subset_time is not None:
+        # Date based formatting
+        if isinstance(df.index, pd.DatetimeIndex):
+            datefmt = mdates.DateFormatter('%b')
+            ax.xaxis.set_major_formatter(datefmt)
 
     plot_time_seperators(regret_periods, df.index, ax)
 
-def plot_regret(df, regret_periods, model_labels, style_algs, input_models, ax=None, only_learner=False):
+def plot_regret(df, regret_periods, model_labels, style_algs, input_models, ax=None, only_learner=False, subset_time=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(5, 4), sharex=False)
 
@@ -162,12 +197,13 @@ def plot_regret(df, regret_periods, model_labels, style_algs, input_models, ax=N
 
     plot_time_seperators(regret_periods, df.index, ax)
 
-    # Date based formatting
-    # if isinstance(df.index, pd.DatetimeIndex):
-    #     datefmt = mdates.DateFormatter('%m-%d')
-    #     ax.xaxis.set_major_formatter(datefmt)
+    if subset_time is not None:
+        # Date based formatting
+        if isinstance(df.index, pd.DatetimeIndex):
+            datefmt = mdates.DateFormatter('%b')
+            ax.xaxis.set_major_formatter(datefmt)
 
-def plot_params(df, regret_periods, model_alias, style_algs, ax=None):
+def plot_params(df, regret_periods, model_alias, style_algs, ax=None, subset_time=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(5, 4), sharex=False)
 
@@ -187,10 +223,11 @@ def plot_params(df, regret_periods, model_alias, style_algs, ax=None):
 
     plot_time_seperators(regret_periods, df.index, ax)
 
-    # Date based formatting
-    # if isinstance(df.index, pd.DatetimeIndex):
-    #     datefmt = mdates.DateFormatter('%b')
-    #     ax.xaxis.set_major_formatter(datefmt)
+    if subset_time is not None:
+        # Date based formatting
+        if isinstance(df.index, pd.DatetimeIndex):
+            datefmt = mdates.DateFormatter('%b')
+            ax.xaxis.set_major_formatter(datefmt)
 
 def plot_time_seperators(regret_periods, index, ax):
     ''' Local utiliy function for plotting vertical time seperators '''

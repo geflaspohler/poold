@@ -88,6 +88,14 @@ class OnlineLearner(ABC):
         """ Record losses """
         self.history.record_losses(losses_fb)
 
+    def get_play(self, t):
+        """ Get play"""
+        return self.history.get_play(t)
+
+    def get_grad(self, t):
+        """ Get play"""
+        return self.history.get_grad(t)
+
     def update_and_play(self, losses_fb, hint):
         """ Update online learner and generate a new play.
         
@@ -378,19 +386,38 @@ class AdaHedgeD(OnlineLearner):
         # Compute drift delta
         delta_drift = np.dot(g_fb, w_fb - w_btrl)
 
-        # Compute auxiliary regret delta 
+        # Compute auxiliary regret delta for the hint term
         if np.isclose(lam_fb, 0):
             delta_aux = np.dot(self.theta, w_fb) - np.min(self.theta)
         else:
-            g_diff = hint_fb - g_os
-            maxval = np.max(g_diff[w_fb != 0.0])
+            delta_aux = self.get_aux_delta(lam_fb, hint_fb, g_os, w_fb)
 
-            delta_aux = lam_fb * \
-                np.log(np.sum(w_fb * np.exp((g_diff - maxval) / lam_fb))) + \
-                np.dot(-g_diff, w_fb) + maxval
+        # Compute the auxiliary regret delta for the mixed term
+        g_norm = np.linalg.norm(g_fb, ord=np.inf) # gradient norm g_t-D
+        err_norm = np.linalg.norm(hint_fb - g_os, ord=np.inf) # hint error norm h_t-D - g_{t-2D:t-D}
+        sigma = min(1.0, g_norm / err_norm) # sigma weighing between hint and ground truth
+        h_hat = g_os + sigma * (hint_fb - g_os) # interpolated hint
+        w_hat = self.softmin_by_groups(self.theta-g_os+h_hat, lam_fb) # play using interpolated hint
+
+        if np.isclose(lam_fb, 0):
+            delta_hat = np.dot(self.theta, w_hat) - np.min(self.theta) + np.dot(g_fb, w_fb - w_hat)
+        else:
+            delta_hat = self.get_aux_delta(lam_fb, h_hat, g_os, w_hat)
+            delta_hat += np.dot(g_fb, w_fb - w_hat)
 
         # Compute final delta term
-        delta = max(min(delta_drift, delta_aux), 0.0)
+        delta = max(min([delta_drift, delta_aux, delta_hat]), 0.0)
+        return delta
+
+    def get_aux_delta(self, lam_fb, hint, g_os, w):
+        """ The delta value for lam != 0 """
+        g_diff = hint - g_os
+        maxval = np.max(g_diff[w != 0.0])
+
+        delta = lam_fb * \
+            np.log(np.sum(w * np.exp((g_diff - maxval) / lam_fb))) + \
+            np.dot(-g_diff, w) + maxval
+
         return delta
 
     def get_reg_dub(self, g_fb, w_fb, hint_fb, g_os, D):
@@ -403,22 +430,23 @@ class AdaHedgeD(OnlineLearner):
         # Get a_t and b_t upper bounds
         a_t = self.get_at_bound(g_fb, hint_fb, g_os)
         b_t = self.get_bt_bound(g_fb, hint_fb, g_os)
+
         # TODO: can modify this to a max length queue to avoid
         # saving the entire history of a_ts
         self.at_prev.append(copy.copy(a_t))
-        at_delay_sum = sum(self.at_prev[-D:])
+        at_delay_sum = sum(self.at_prev[-D:-1])
 
         # Update max a_t term
         self.at_max = np.max([self.at_max, at_delay_sum])
 
         # Update delta term
-        delta = a_t**2 + 2*b_t
+        delta = a_t**2 + 2*self.alpha*b_t
         self.Delta += delta
 
-        eta = 2*self.at_max + np.sqrt(self.Delta)
+        eta = (2*self.at_max + np.sqrt(self.Delta)) / self.alpha
 
         # Ensure monotonic increases
-        return np.max([self.lam, eta]), delta 
+        return eta, delta 
 
     def get_at_bound(self, g_fb, hint_fb, g_os):
         """ Get bound on the value of a_t terms, assume diam(W) = 2
@@ -442,7 +470,7 @@ class AdaHedgeD(OnlineLearner):
         """
         g_norm = np.linalg.norm(g_fb, ord=np.inf)
         err_norm = np.linalg.norm(hint_fb - g_os, ord=np.inf)
-        return np.min([0.5*(err_norm**2), g_norm * err_norm])
+        return 0.5*(err_norm**2) - 0.5*np.max([0, err_norm - g_norm])**2
 
 class DORM(OnlineLearner):
     """
@@ -575,6 +603,8 @@ class DORMPlus(OnlineLearner):
         g_fb = fb["g"]
         regret_fb = loss_regret(g_fb, w_fb, self.groups) # compute regret w.r.t. groups 
 
+        print("g", g_fb)
+        print("r", regret_fb)
         # Update psuedo-play 
         self.p = np.maximum(0, self.p + regret_fb + hint - self.hint_prev)
 
@@ -672,13 +702,16 @@ class ReplicatedOnlineLearner(object):
 
     def record_losses(self, losses_fb):
         """ Record losses """
-        try:
-            self.history.record_losses(losses_fb)
-            self.learner_queue[self.t % self.reps].record_losses(losses_fb)
-        except:
-            pdb.set_trace()
-            self.history.record_losses(losses_fb)
-            self.learner_queue[self.t % self.reps].record_losses(losses_fb)
+        self.history.record_losses(losses_fb)
+        self.learner_queue[self.t % self.reps].record_losses(losses_fb)
+
+    def get_play(self, t):
+        """ Get play"""
+        return self.learner_queue[self.t % self.reps].get_play(t)
+
+    def get_grad(self, t):
+        """ Get grad """
+        return self.learner_queue[self.t % self.reps].get_grad(t)
 
     def get_outstanding(self, include=True, all_learners=False):
         """ Gets outstanding predictions at time self.t

@@ -124,9 +124,12 @@ class S2SHinter(Hinter):
 
             for j, hinter in enumerate(self.hinters[hint_type]):
                 # Get hint from correct hinter
-                hint = hinter.get_hint(t_os, regret=self.regret_hints, loss_regret=self.loss_regret)
-
                 hint_name = self.hint_names[hint_type][j]
+                if hint_name == "avg_prev_g":
+                    hint = hinter.get_hint(i, regret=self.regret_hints, loss_regret=self.loss_regret)
+                else:
+                    hint = hinter.get_hint(t_os, regret=self.regret_hints, loss_regret=self.loss_regret)
+
                 # Add hint to hint column in matrix 
                 if "_future" in hint_name and i != 0:
                     pass
@@ -141,6 +144,14 @@ class S2SHinter(Hinter):
                 n_i += 1
 
         return hint_matrix 
+
+    def update_learner(self, learner):
+        """ Provide a new learner value to all hinters """
+        self.learner = learner
+        # Initialize hinter objects
+        for h, horizon_hints in self.hinters.items():
+            for hinter in self.hinters[h]:
+                hinter.learner = learner
 
     def date_to_target(self, date):
         """ Convert issuance date to target date for forecasting """
@@ -195,7 +206,6 @@ class S2SHinter(Hinter):
             "environment": self.environment, 
             "learner": self.learner
         }
-
         # Get hinter 
         if hint_type == "prev_y":
             hinter = PrevObs(**kwargs)   
@@ -212,12 +222,10 @@ class S2SHinter(Hinter):
             hinter = ExpertEnsemble(**kwargs, expert_weights=expert_weights)
         elif hint_type == "current_w":
             hinter = ExpertEnsemble(**kwargs)                                   
-        elif "prev_g" in hint_type:
-            hinter = PrevGrad(**kwargs)                                   
-        elif "prev_g_" in hint_type:
-            hinter = PrevGrad(**kwargs)                                   
         elif hint_type == "avg_prev_g":
             hinter = AvgPrevGrad(**kwargs)                                   
+        elif "prev_g" in hint_type:
+            hinter = PrevGrad(**kwargs)                                   
         elif hint_type == "mean_g":
             hinter = MeanGrad(**kwargs)    
         elif hint_type == "None":
@@ -243,7 +251,7 @@ class S2SHinter(Hinter):
         # Compute observations and gradients for hinters
         for t_fb, loss_fb in losses_fb:
             y_fb = self.environment.get_gt(t_fb)
-            g_fb = self.learner.history.get_grad(t_fb)
+            g_fb = self.learner.get_grad(t_fb)
             for horizon_hints in self.hinters.values():
                 for hinter in horizon_hints:
                     hinter.update_hint_data(t_fb, g_fb, y_fb)
@@ -312,16 +320,12 @@ class Hinter(ABC):
         hint_data = {}
 
         # Get outstanding date expert predictions
-        g_tilde =  self.get_pseudo_grad(t)
-        w = self.learner.history.get_play(t)
+        g_tilde = self.get_pseudo_grad(t)
+        w = self.learner.get_play(t)
 
         if regret: 
             # Return instantaneous regret
-            try:
-                hint = self.loss_regret(g=g_tilde, w=w)
-            except:
-                pdb.set_trace()
-                hint = self.loss_regret(g=g_tilde, w=w)
+            hint = self.loss_regret(g=g_tilde, w=w)
         else:
             # Return loss gradient
             hint = g_tilde       
@@ -404,7 +408,7 @@ class HorizonForecast(Hinter):
 
         # Get model predictions
         X = self.environment.get_pred(t, verbose=False)
-        w = self.learner.history.get_play(t)
+        w = self.learner.get_play(t)
 
         return  self.loss_gradient(
                X=X.to_numpy(), y=y_tilde.to_numpy(), w=w).reshape(-1,)
@@ -426,8 +430,8 @@ class ExpertEnsemble(Hinter):
     def get_pseudo_grad(self, t):
         # Get model predictions
         X = self.environment.get_pred(t, verbose=False)
-        w = self.learner.history.get_play(t)
-        w_last = self.learner.history.get_last_play() 
+        w = self.learner.get_play(t)
+        w_last = self.learner.get_last_play() 
 
         if self.ew is not None:
             y_tilde = X @ self.ew  # use ew to get an estimate 
@@ -454,7 +458,7 @@ class PrevObs(Hinter):
         X = self.environment.get_pred(t, verbose=False)
         # Get most recently available ground truth data
         y_tilde = self.environment.most_recent_obs(t) 
-        w = self.learner.history.get_play(t)
+        w = self.learner.get_play(t)
 
         g_tilde = self.loss_gradient(X=X.to_numpy(), y=y_tilde.to_numpy(), w=w)
         return g_tilde
@@ -477,7 +481,7 @@ class MeanObs(Hinter):
 
     def get_pseudo_grad(self, t): 
         X = self.environment.get_pred(t, verbose=False)
-        w = self.learner.history.get_play(t)
+        w = self.learner.get_play(t)
 
         if self.y_sum is None:
             # Get most recently available ground truth data
@@ -509,7 +513,7 @@ class TrendObs(Hinter):
     def get_pseudo_grad(self, t): 
         # Get most recently available ground truth data
         X = self.environment.get_pred(t, verbose=False)
-        w = self.learner.history.get_play(t)
+        w = self.learner.get_play(t)
 
         if len(self.y_prev) < 2:
             y_tilde = self.environment.most_recent_obs(t) 
@@ -541,14 +545,18 @@ class AvgPrevGrad(Hinter):
         self.g_dict = {}
 
     def update_hint_data(self, t_fb, g_fb, y_fb): 
-        self.g_dict[t_fb] = g_fb
+        # TODO: update with max delay to avoid keeping full gradient history
+        self.g_prev.append(g_fb)
 
     def reset_hint_data(self): 
-        self.g_dict = {}
+        self.g_prev = []
 
     def get_pseudo_grad(self, t): 
         # Get most recently available ground truth data
-        return self.g_dict.get(t, np.zeros((self.d)))
+        if t < len(self.g_prev):
+            return self.g_prev[-t]
+        else:
+            return np.zeros((self.d,))
 
 class MeanGrad(Hinter):
     ''' Returns mean of previously observed feedback gradients '''
@@ -577,7 +585,7 @@ class ReplicatedS2SHinter(object):
         self.hinter_queue = [copy.deepcopy(hinter) for i in range(replicates)]
         # Ensure that hinters maintain a reference to the learner object
         for i in range(replicates):
-            self.hinter_queue[i].learner = hinter.learner
+            self.hinter_queue[i].update_learner(hinter.learner)
         self.reps = replicates
 
     def get_hint(self, t, os_times):
