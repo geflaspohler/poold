@@ -22,9 +22,6 @@ from poold.utils import loss_regret
 from poold.utils import visualize
 from poold.learners import ReplicatedOnlineLearner 
 
-#TODO: remove this import
-import pdb
-
 # Set print parameters
 np.set_printoptions(precision=3)
 
@@ -43,6 +40,8 @@ parser.add_argument('--hint', '-hi', default="None",
                     help="Optimistic hint type. Comma separated list of hint types.")
 parser.add_argument('--replicates', '-re', default=1,
                     help="Number of online learning replicates.")
+parser.add_argument('--visualize', '-vis', default=False,
+                    help="Visualize online learning output.")
 args, opt = parser.parse_known_args()
 
 # Task parameters
@@ -75,7 +74,6 @@ regret_hints = False if alg == "adahedged" else True
 # Set alias for online learner
 model_alias["online_learner"] = f"{alg_naming[alg]}"
 
-# exp_string = f"{gt_id}_{horizon}_{date_str}{"" if reps == 1 else ("_R" + str(reps))}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
 if reps == 1:
     exp_string = f"{gt_id}_{horizon}_{date_str}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
 else:
@@ -87,8 +85,6 @@ if os.path.exists(save_file):
 
 # Forecast targets
 targets = get_target_dates(date_str=date_str, horizon=horizon) # forecast target dates
-# targets = targets[175:205] # TODO: delete this
-# targets = targets[-26:] # TODO: delete this
 targets_pred = copy.deepcopy(targets) # targets we successfully make forecasts for 
 period_length = 26 # yearly regret periods/resetting
 
@@ -228,14 +224,11 @@ losses_fb = s2s_env.get_losses(
     override=True)
 learner.history.record_losses(losses_fb)
 
-if reps == 1:
-    exp_string = f"{gt_id}_{horizon}_{date_str}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
-else:
-    exp_string = f"{gt_id}_{horizon}_{date_str}_R{reps}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
 fl = open(f"experiments/learner_history_{exp_string}.pickle", "wb")
 pickle.dump([targets_pred, regret_periods, model_alias, learner.history], fl)
 
-# visualize(learner.history, regret_periods, targets_pred, model_alias, style_algs)
+if visualize:
+    visualize(learner.history, regret_periods, targets_pred, model_alias, style_algs)
 
 if learn_to_hint:
     hint_losses_fb = s2s_hint_env.get_losses(T-1, os_times=learner.get_outstanding(include=False, all_learners=True), override=True)
@@ -245,6 +238,8 @@ if learn_to_hint:
     pickle.dump([targets_pred, regret_periods, {}, hint_learner.history], fh)
 
     # Visualize history
-    # visualize(hint_learner.history, regret_periods, targets_pred)
+    if visualize:
+        visualize(hint_learner.history, regret_periods, targets_pred)
 
-# plt.show()
+if visualize:
+    plt.show()
