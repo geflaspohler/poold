@@ -231,7 +231,7 @@ man_pages = [
 texinfo_documents = [
     ('index', 'poold', u'PoolD Documentation',
      u"Genevieve Flaspohler", 'PoolD',
-     'Python library for Optimistic Online Learning under Delay ', 'Miscellaneous'),
+     'Python library for Optimistic Online Learning under Delay', 'Miscellaneous'),
 ]
 
 # Documents to append as an appendix to all manuals.

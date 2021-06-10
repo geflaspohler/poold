@@ -30,6 +30,7 @@ class S2SEnvironment(Environment):
         # Call base class constructor
         super().__init__(times)
         self.models = models
+        self.d = len(models)
         self.gt_id = gt_id
         self.horizon = horizon
 
@@ -45,21 +46,26 @@ class S2SEnvironment(Environment):
         # Rodeo loss object
         self.rodeo_loss = RodeoLoss()
 
-    def get_feedback(self, t, os_times=None):
-        """ Get feedback avaliable at time t 
+    def get_losses(self, t, os_times=None, override=False):
+        """ Get loss functions avaliable at time t 
 
         Args:
-            t (int): current time
+            t (int): current time 
             os_times (list[int]): list of times with outstanding forecasts
                 if None, os_times = [t]
-        """
-        assert(t <= self.T)
+            override (bool): if True, return losses for all os_times,
+                ignoring data availability 
 
+        Returns: A dictionary containing the loss as a function of play w,
+        the loss gradient as a function of play w, and a dictionary of 
+        expert losses at time t.
+        """
         if os_times is None:
             os_times = range(0, self.T)
 
         date = self.times[t]
         date_str = datetime.strftime(date, '%Y%m%d')
+        print("Target:", self.date_to_target(date))
 
         # Outstanding prediction dates
         os_dates = [self.times[t] for t in os_times]
@@ -68,24 +74,45 @@ class S2SEnvironment(Environment):
         os_targets = [self.date_to_target(d) for d in os_dates]
 
         # Get times with targets earlier than current prediction date
-        return [t for t, d in zip(os_times, os_targets) if d < date]
+        if not override:
+            os_feedbacks = [t for t, d in zip(os_times, os_targets) if d < date]
+        else:
+            os_feedbacks = [t for t, d in zip(os_times, os_targets)]
 
-    def get_loss(self, t):
+        os_losses = [self._get_loss(t) for t in os_feedbacks]
+
+        # Return (time, feedback tuples)
+        return list(zip(os_feedbacks, os_losses))
+
+    def _get_loss(self, t):
         """ Get loss function at time t 
 
         Args:
             t (int): current time 
+
+        Returns: A dictionary containing the loss as a function of play w,
+        the loss gradient as a function of play w, and a dictionary of 
+        expert losses at time t.
         """
         X_t = self.get_pred(t, verbose=False)
-        y_t = self.get_gt(t)
+
+        # If missing expert predictions
+        if X_t is None:
+            return None
+
+        X_t = X_t.to_numpy(copy=False)
+        y_t = self.get_gt(t).to_numpy(copy=False)
+        
+        expert_losses = {}
+        for m_i, m in enumerate(self.models):
+            w = np.zeros((self.d,))
+            w[m_i] = 1.0
+            expert_losses[m] = self.rodeo_loss.loss(X=X_t, y=y_t, w=w)
 
         loss = {
-            "fun": partial(self.rodeo_loss.loss, 
-                            X=X_t.to_numpy(copy=False), 
-                            y=y_t.to_numpy(copy=False)),
-            "jac": partial(self.rodeo_loss.loss_gradient, 
-                            X=X_t.to_numpy(copy=False), 
-                            y=y_t.to_numpy(copy=False))
+            "fun": partial(self.rodeo_loss.loss, X=X_t, y=y_t),
+            "grad": partial(self.rodeo_loss.loss_gradient, X=X_t, y=y_t),
+            "exp": expert_losses
         }
 
         return loss
@@ -132,15 +159,37 @@ class S2SEnvironment(Environment):
                 merged_df = pd.merge(merged_df, df, 
                     on=["start_date", "lat", "lon"])
 
-
-        if merged_df is None and verbose:
-            print(f"Warning: No model forecasts for {target}")
+        if merged_df is None:
+            if verbose:
+                print(f"Warning: No model forecasts for {target}")
             return None
 
-        if verbose:
-            print(f"Target {t}: missing models {missing_models}")
+        if len(missing_models) > 0:
+            if verbose:
+                print(f"Target {t}: missing models {missing_models}")
+            return None
 
         return merged_df
+
+    def check_pred(self, t, verbose=True):
+        """ Check if all model predictions exist for time t.
+
+        Args:
+            t (int): current time  
+            verbose (bool): print model load status 
+        """
+        assert(t <= self.T)
+
+        missing_list = []
+        for model in self.models:
+            pres = self.check_model(t, model)
+            if pres == False:
+                missing_list.append(model)
+        
+        print(f"Missing models {missing_list}")
+        if len(missing_list) > 0:
+            return False
+        return True
 
     def time_to_target(self, t):
         """ Convert prediction time to a target date """
@@ -181,37 +230,53 @@ class S2SEnvironment(Environment):
         target = self.date_to_target(date)
         target_str = datetime.strftime(target, '%Y%m%d')      
 
-        try:
-            fname = get_forecast_filename(
-                    model=model, 
-                    submodel=None,
-                    gt_id=self.gt_id,
-                    horizon=self.horizon,
-                    target_date_str=target_str)
-        except:
-            pdb.set_trace()
-            fname = get_forecast_filename(
-                    model=model, 
-                    submodel=None,
-                    gt_id=self.gt_id,
-                    horizon=self.horizon,
-                    target_date_str=target_str)
+        fname = get_forecast_filename(
+                model=model, 
+                submodel=None,
+                gt_id=self.gt_id,
+                horizon=self.horizon,
+                target_date_str=target_str)
 
-        if not os.path.exists(fname) and verbose:
-            printf("Warning: no forecast found for model {model} on target {target}.")
-            return None
+        if not os.path.exists(fname):
+            raise ValueError(f"No forecast found for model {model} on target {target}.")
 
         df = pd.read_hdf(fname).rename(columns={"pred": f"{model}"})
 
         # If any of expert predictions are NaN
-        if df.isna().any(axis=None) and verbose: 
-            printf("Warning: NaNs in forecast for model {model} on target {target}.")
-            return None
+        if df.isna().any(axis=None): 
+            raise ValueError(f"NaNs in forecast for model {model} on target {target}.")
 
         # Important to sort in order to ensure lat/lon points are in consistant order 
         df = df.set_index(['start_date', 'lat', 'lon']).squeeze().sort_index()   
         
         return df
+
+    def check_model(self, t, model, verbose=False):
+        """ Check if model prediction exists at a 
+        specific time.
+
+        Args:
+            t (int): current time  
+            model (str):  model name
+            verbose (bool): print model load status 
+        """
+        assert(t <= self.T)
+        date = self.times[t]
+        target = self.date_to_target(date)
+        target_str = datetime.strftime(target, '%Y%m%d')      
+
+        fname = get_forecast_filename(
+                model=model, 
+                submodel=None,
+                gt_id=self.gt_id,
+                horizon=self.horizon,
+                target_date_str=target_str)
+
+        if not os.path.exists(fname):
+            print(fname)
+            return False 
+        else:
+            return True
 
 class RodeoLoss(object):
     """ Rodeo loss object """
@@ -258,296 +323,3 @@ class RodeoLoss(object):
 
         return (X.T @ err / \
             (np.sqrt(G)*np.linalg.norm(err, ord=2))).reshape(-1,)
-
-class HintingLossODAFTRL(object): 
-    def __init__(self, q):
-        if q == 2 or q == np.inf:
-            self.q = q
-        else:
-            raise ValueError(f"Gradients for {q}-norm not implemented. Use q = 2 or infty")
-
-    def loss_gradient(self, H, y, om, g):
-        """Computes the hint loss location om. 
-
-        Args:
-           H: d x n np array - prediction from self.n hinters 
-           y: d x 1 np.array - ground truth cumulative loss 
-           om: n x 1 np.array - omega weight play of hinter
-           g (np.array) - d x 1 vector of gradient at time t
-        """
-        return np.linalg.norm(g, ord=self.q) * np.linalg.norm(y - H @ om, ord=self.q)
-    
-    def loss_gradient(self, H, y, om, g):
-        """Computes the gradient of the hint loss location om. 
-
-        Args:
-           H: d x n np array - prediction from self.n hinters 
-           y: d x 1 np.array - ground truth cumulative loss 
-           om: n x 1 np.array - omega weight play of hinter
-           g (np.array) - d x 1 vector of gradient at time t
-        """
-        # Unpack arguments
-        d = H.shape[0] # Number of gradient values 
-        n = H.shape[1] # Number of experts
-
-        err = H @ om - y
-
-        if self.q == np.inf:
-            # Return the inf norm gradient
-            max_idx = np.argmax(err)
-            max_err = err[max_idx]
-
-            if np.isclose(max_err, 0.0):
-                return np.zeros((n,))
-
-            err_sign = np.sign(max_err)
-            g_norm = np.linalg.norm(g, ord=self.q)
-
-            # Gradient of the inf-norm
-            return (g_norm  * err_sign * H.T[:, max_idx]).reshape(-1,)  
-        else:
-            # Return the q-norm gradient
-            err_norm = np.linalg.norm(err, ord=self.q)
-            if np.isclose(err_norm, 0.0):
-                return np.zeros((n,))
-
-            g_norm = np.linalg.norm(g, ord=self.q)
-
-            # Gradient of the inf-norm
-            return ((g_norm / err_norm) * (H.T @ err)).reshape(-1,)
-
-class HintingLossDOOMD(object): 
-    def __init__(self):
-        pass
-
-    def loss(self, **kwargs):
-        """Computes the MSE loss. 
-
-        Args:
-           y: d x 1 np.array - true cumulative loss gradient, t-2D:t-D
-           g_hat: d x 1 np.array - predicted loss gradients
-           g_tD: d x 1 np.array -  true loss gradient at t-2D
-           h_t: d x 1 np.array -  hint at time t-D
-           h_tp: d x 1 np.array -  hint at time t-D+1
-        """     
-        # Unpack arguments
-        g_os = kwargs['y']
-        g_hat = kwargs['g_hat']
-        g_tD = kwargs['g_tD']
-        h_t = kwargs['hint_t']
-        h_tp = kwargs['hint_tp']
-
-        return np.linalg.norm(g_tD + h_tp - h_t, ord=2) * np.linalg.norm(g_hat - g_os, ord=2)
-    
-    def loss_experts(self, **kwargs):
-        """Computes the MSE loss for each expert. 
-
-        Args:
-           X: d x n np array - prediction at d gradient values from n experts        
-           y: d x 1 np.array - true cumulative loss gradient, t-2D:t-D
-           g_hat: d x 1 np.array - predicted loss gradients
-           g_tD: d x 1 np.array -  true loss gradient at t-2D
-           h_t: d x 1 np.array -  hint at time t-D
-           h_tp: d x 1 np.array -  hint at time t-D+1
-        """    
-        # Unpack arguments
-        X = kwargs['X']
-        g_os = kwargs['y']
-        g_tD = kwargs['g_tD']
-        h_t = kwargs['hint_t']
-        h_tp = kwargs['hint_tp']
-
-        n = X.shape[1] 
-        return np.linalg.norm(g_tD, ord=2) * np.linalg.norm(X - np.matlib.repmat(g_os.reshape(-1, 1), 1, n), ord=2, axis=0)
-    
-    def loss_gradient(self, **kwargs):
-        """Computes the gradient of the MSE loss at location w. 
-
-        Args:
-           X: d x n np array - prediction from self.d experts
-           y: d x 1 np.array - ground truth 
-           w: n x 1 np.array - location at which to compute gradient.
-           g_tD: d x 1 np.array -  true loss gradient at t-2D
-           h_t: d x 1 np.array -  hint at time t-D
-           h_tp: d x 1 np.array -  hint at time t-D+1
-        """
-        # Unpack arguments
-        X = kwargs['X']
-        y = kwargs['y']
-        w = kwargs['w']
-        g_tD = kwargs['g_tD']
-        h_t = kwargs['hint_t']
-        h_tp = kwargs['hint_tp']
-
-        d = X.shape[0] # Number of gradient values 
-        n = X.shape[1] # Number of experts
-
-        # Add default values
-        err = X @ w - y
-        err_norm = np.linalg.norm(err, ord=2)
-        g_norm = np.linalg.norm(g_tD + h_tp - h_t, ord=2)
-
-        if np.isclose(err_norm, 0.0):
-            return np.zeros((n,))
-
-        return ((g_norm / err_norm) * (X.T @ err)).reshape(-1,)
-
-class HintingLossODAFTRL(object): 
-    def __init__(self, q):
-        if q == 2 or q == np.inf:
-            self.q = q
-        else:
-            raise ValueError(f"Gradients for {q}-norm not implemented. Use q = 2 or infty")
-
-    def loss(self, **kwargs):
-        """Computes the MSE loss. 
-
-        Args:
-           y: d x 1 np.array - true cumulative loss gradient
-           y_prev: d x 1 np.array - true previous loss gradient
-           y_hat: d x 1 np.array - predicted loss gradient 
-        """     
-        # Unpack arguments
-        g_os = kwargs['y']
-        g_hat = kwargs['g_hat']
-        g_t = kwargs['g_t']
-
-        return np.linalg.norm(g_t, ord=self.q) * np.linalg.norm(g_os - g_hat, ord=self.q)
-    
-    def loss_experts(self, **kwargs):
-        """Computes the MSE loss for each expert. 
-
-        Args:
-           X: d x n np array - prediction at d gradient values from n experts        
-           y_prev: d x 1 np.array - true previous loss gradient
-           y: d x 1 np.array - ground truth gradient value at d points
-        """    
-        # Unpack arguments
-        X = kwargs['X']
-        y = kwargs['y']
-        g_t = kwargs['g_t']
-
-        n = X.shape[1] 
-        return np.linalg.norm(g_t, ord=self.q) * np.linalg.norm(X - np.matlib.repmat(y.reshape(-1, 1), 1, n), ord=self.q, axis=0)
-    
-    def loss_gradient(self, **kwargs):
-        """Computes the gradient of the MSE loss at location w. 
-
-        Args:
-           X: d x n np array - prediction from self.d experts
-           y: d x 1 np.array - ground truth 
-           w: n x 1 np.array - location at which to compute gradient.
-        """
-        # Unpack arguments
-        X = kwargs['X']
-        y = kwargs['y']
-        w = kwargs['w']
-
-        d = X.shape[0] # Number of gradient values 
-        n = X.shape[1] # Number of experts
-
-        # Add default values
-        g_t = kwargs.get('g_t', np.zeros((d,)))
-
-        err = X @ w - y
-
-        if self.q == np.inf:
-            # Return the inf norm gradient
-            max_idx = np.argmax(err)
-            max_err = err[max_idx]
-            err_sign = np.sign(max_err)
-            g_norm = np.linalg.norm(g_t, ord=self.q)
-
-            # TODO: Which subgradient to return 
-            if np.isclose(max_err, 0.0):
-                return np.zeros((n,))
-
-            # Gradient of the inf-norm
-            return (g_norm  * err_sign * X.T[:, max_idx]).reshape(-1,)  
-        else:
-            # Return the q-norm gradient
-            err_norm = np.linalg.norm(err, ord=self.q)
-            g_norm = np.linalg.norm(g_t, ord=self.q)
-
-            # TODO: Which subgradient to return 
-            if np.isclose(err_norm, 0.0):
-                return np.zeros((n,))
-
-            # Gradient of the inf-norm
-            return ((g_norm / err_norm) * (X.T @ err)).reshape(-1,)
-
-class HintingLossDOOMD(object): 
-    def __init__(self):
-        pass
-
-    def loss(self, **kwargs):
-        """Computes the MSE loss. 
-
-        Args:
-           y: d x 1 np.array - true cumulative loss gradient, t-2D:t-D
-           g_hat: d x 1 np.array - predicted loss gradients
-           g_tD: d x 1 np.array -  true loss gradient at t-2D
-           h_t: d x 1 np.array -  hint at time t-D
-           h_tp: d x 1 np.array -  hint at time t-D+1
-        """     
-        # Unpack arguments
-        g_os = kwargs['y']
-        g_hat = kwargs['g_hat']
-        g_tD = kwargs['g_tD']
-        h_t = kwargs['hint_t']
-        h_tp = kwargs['hint_tp']
-
-        return np.linalg.norm(g_tD + h_tp - h_t, ord=2) * np.linalg.norm(g_hat - g_os, ord=2)
-    
-    def loss_experts(self, **kwargs):
-        """Computes the MSE loss for each expert. 
-
-        Args:
-           X: d x n np array - prediction at d gradient values from n experts        
-           y: d x 1 np.array - true cumulative loss gradient, t-2D:t-D
-           g_hat: d x 1 np.array - predicted loss gradients
-           g_tD: d x 1 np.array -  true loss gradient at t-2D
-           h_t: d x 1 np.array -  hint at time t-D
-           h_tp: d x 1 np.array -  hint at time t-D+1
-        """    
-        # Unpack arguments
-        X = kwargs['X']
-        g_os = kwargs['y']
-        g_tD = kwargs['g_tD']
-        h_t = kwargs['hint_t']
-        h_tp = kwargs['hint_tp']
-
-        n = X.shape[1] 
-        return np.linalg.norm(g_tD, ord=2) * np.linalg.norm(X - np.matlib.repmat(g_os.reshape(-1, 1), 1, n), ord=2, axis=0)
-    
-    def loss_gradient(self, **kwargs):
-        """Computes the gradient of the MSE loss at location w. 
-
-        Args:
-           X: d x n np array - prediction from self.d experts
-           y: d x 1 np.array - ground truth 
-           w: n x 1 np.array - location at which to compute gradient.
-           g_tD: d x 1 np.array -  true loss gradient at t-2D
-           h_t: d x 1 np.array -  hint at time t-D
-           h_tp: d x 1 np.array -  hint at time t-D+1
-        """
-        # Unpack arguments
-        X = kwargs['X']
-        y = kwargs['y']
-        w = kwargs['w']
-        g_tD = kwargs['g_tD']
-        h_t = kwargs['hint_t']
-        h_tp = kwargs['hint_tp']
-
-        d = X.shape[0] # Number of gradient values 
-        n = X.shape[1] # Number of experts
-
-        # Add default values
-        err = X @ w - y
-        err_norm = np.linalg.norm(err, ord=2)
-        g_norm = np.linalg.norm(g_tD + h_tp - h_t, ord=2)
-
-        if np.isclose(err_norm, 0.0):
-            return np.zeros((n,))
-
-        return ((g_norm / err_norm) * (X.T @ err)).reshape(-1,)

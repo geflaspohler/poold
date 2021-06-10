@@ -20,7 +20,7 @@ def get_selected_submodel_name(gt_id, target_horizon):
     """
     # Read in selected model parameters for given task
     if gt_id == "contest_tmp2m" and target_horizon == "34w":
-        return "multillr-margin56-rmse-mean-8153799589395336582"
+        return "multillr-margin56-rmse-mean-9017307827696341891"
     elif gt_id == "contest_tmp2m" and target_horizon == "56w":
         return "multillr-margin56-rmse-mean-4547298333771221808"
     elif gt_id == "contest_precip" and target_horizon == "34w":
