@@ -4,7 +4,6 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-poold = {editable = true, file = "file:///Users/quetzal/content/subseasonal-forecasting/code/poold"}
 numpy = "*"
 scipy = "*"
 pandas = "*"
