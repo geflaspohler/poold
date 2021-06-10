@@ -1,5 +1,8 @@
 # local package
 -e .
+numpy
+scipy
+pandas
 
 # external requirements
 click

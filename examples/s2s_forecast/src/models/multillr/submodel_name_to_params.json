@@ -1,0 +1,30 @@
+{
+    "multillr-margin56-rmse-mean-8858196993008493006": {
+        "margin_in_days": 56,
+        "metric": "rmse",
+        "criterion": "mean",
+        "x_cols": [
+            "ones",
+            "tmp2m_clim",
+            "tmp2m_shift29",
+            "tmp2m_shift58",
+            "rhum_shift30",
+            "pres_shift30",
+            "subx_cfsv2_precip-14.5d_shift15",
+            "subx_cfsv2_precip-0.5d_shift15",
+            "precip_clim",
+            "precip_shift29",
+            "precip_shift58",
+            "mei_shift45",
+            "phase_shift17",
+            "sst_2010_1_shift30",
+            "sst_2010_2_shift30",
+            "sst_2010_3_shift30",
+            "icec_2010_1_shift30",
+            "icec_2010_2_shift30",
+            "icec_2010_3_shift30",
+            "hgt_10_2010_1_shift30",
+            "hgt_10_2010_2_shift30"
+        ]
+    }
+}

@@ -6,7 +6,6 @@
 
 PROJECT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 PROJECT_NAME = poold
-NFS_DATA_DIR = /data/vision/fisher/data1/poold
 PYTHON_INTERPRETER = $(shell which python3)
 
 ifeq (,$(shell which conda))
@@ -24,17 +23,6 @@ requirements: test_environment
 	$(PYTHON_INTERPRETER) -m pip install -U pip setuptools wheel
 	$(PYTHON_INTERPRETER) -m pip install -r requirements.txt
 
-## Soft-link (NFS) or copy (local) raw data
-data/raw:
-	# check if NFS is mounted and link or copy data from NFS_DATA_DIR to data/raw
-	if [ -e /etc/auto.d/auto.data.vision.fisher ]; \
-	then echo "Soft-linking to NFS data" && ln -sf ${NFS_DATA_DIR} data/raw; \
-	else echo "Copying data from NFS" && scp -r login.csail.mit.edu:${NFS_DATA_DIR}/. data/raw; \
-	fi
-
-## Make Dataset
-data: requirements
-	$(PYTHON_INTERPRETER) src/data/make_dataset.py data/raw data/processed
 
 ## Delete all compiled Python files
 clean:
@@ -43,7 +31,7 @@ clean:
 
 ## Lint using flake8
 lint:
-	flake8 src
+	flake8 poold 
 
 ## Set up python interpreter environment
 create_environment:

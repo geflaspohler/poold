@@ -1,0 +1,50 @@
+{
+    "contest_precip_34w":
+    {
+        "train_years": "all",
+        "margin_in_days": null,
+        "use_cfsv2": "False"
+    },
+    "contest_precip_56w":
+    {
+        "train_years": "all",
+        "margin_in_days": null,
+        "use_cfsv2": "False"
+    },
+    "contest_tmp2m_34w": 
+    {
+        "train_years": "all",
+        "margin_in_days": null,
+        "use_cfsv2": "False"
+    },
+    "contest_tmp2m_56w":
+    {
+        "train_years": "all",
+        "margin_in_days": null,
+        "use_cfsv2": "True"
+    }, 
+    "us_precip_34w":
+    {
+        "train_years": "all",
+        "margin_in_days": null,        
+        "use_cfsv2": "True"
+    },
+    "us_precip_56w":
+    {
+        "train_years": "all",
+        "margin_in_days": null,        
+        "use_cfsv2": "True"
+    },
+    "us_tmp2m_34w": 
+    {
+        "train_years": "all",
+        "margin_in_days": null,        
+        "use_cfsv2": "True"
+    },
+    "us_tmp2m_56w":
+    {
+        "train_years": "all",
+        "margin_in_days": null,
+        "use_cfsv2": "True"
+    }
+}

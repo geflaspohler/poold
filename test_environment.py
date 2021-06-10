@@ -1,6 +1,5 @@
 import sys
 
-
 def main():
     system_major = sys.version_info.major
     required_major = 3
