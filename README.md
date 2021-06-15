@@ -1,10 +1,18 @@
 PoolD
 ==============================
-
 ## Python library for Optimistic Online Learning under Delay 
+This Python package implements algorithms for online learning under delay using optimistic hints. More details on the algorithms and their regret properties can be found in the manuscript [Online Learning with Optimism and Delay](https://arxiv.org/abs/2106.06885).
 
-This library implements algorithms for online learning under delay using optimistic hints. The core of the 
-library is the learners module. Learners can be instantiated using the `create` method:
+```
+@article{flaspohler2021online,
+      title={Online Learning with Optimism and Delay}, 
+      author={Genevieve Flaspohler and Francesco Orabona and Judah Cohen and Soukayna Mouatadid and Miruna Oprescu and Paulo Orenstein and Lester Mackey},
+      year={2021},
+      journal={arXiv preprint arXiv:2106.06885}
+}
+```
+
+The core of the library is the learners module. Learners can be instantiated using the `create` method:
 ```
 import poold
 model_list = ["model1", "model2"]
