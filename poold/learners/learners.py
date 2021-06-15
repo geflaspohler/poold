@@ -26,8 +26,6 @@ import copy
 from ..utils import loss_regret, normalize_by_groups
 from ..utils import History
 
-import pdb # TODO: delete this import
-
 class OnlineLearner(ABC):
     """ OnlineLearner abstract base class. """    
     def __init__(self, model_list, groups=None, T=None, **kwargs):

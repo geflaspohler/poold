@@ -2,6 +2,8 @@
 
 For example:
     import poold
+    poold.visualize(learner.history)
+    plt.show()
 
 """
 # System imports
@@ -32,8 +34,6 @@ def visualize_multiple(experiment_list, style_algs, subset_time=None, filename="
     fig_r, ax_r = plt.subplots(1, 1, figsize=(10, 4), sharex=False)
     fig_p, ax_p = plt.subplots(1, 1, figsize=(5, 4), sharex=False)
     fig_w, ax_w = plt.subplots(1, num_plots, figsize=(4*num_plots, 4), sharex=False)
-    # gs1 = gridspec.GridSpec(1, num_plots)
-    # gs1.update(wspace=0.025, hspace=0.05) # set the spacing between axes.
 
     df_losses = None
     for i, (targets, regret_periods, model_alias, history) in enumerate(experiment_list):
@@ -42,8 +42,8 @@ def visualize_multiple(experiment_list, style_algs, subset_time=None, filename="
             df_losses = copy.copy(df)
         else:
             df_losses = df_losses.merge(df)
-
     mean_losses = df_losses.mean(axis=0)
+
     # Save dataframe in latex table format
     fname = f"./eval/losses_{filename}.tex"
     mean_losses.to_latex(fname, float_format="%.3f", longtable=False)
@@ -54,6 +54,9 @@ def visualize_multiple(experiment_list, style_algs, subset_time=None, filename="
     fig_r.subplots_adjust(top=0.95)
     fig_p.tight_layout()
     fig_p.subplots_adjust(top=0.95)
+
+    if not os.path.exists('figs'):
+        os.mkdir('figs')
     filename_w = f"./figs/weights_{filename}.pdf"
     filename_r = f"./figs/regret_{filename}.pdf"
     filename_p = f"./figs/params_{filename}.pdf"
@@ -65,10 +68,20 @@ def visualize_multiple(experiment_list, style_algs, subset_time=None, filename="
 
 def visualize(history, regret_periods=None, time_labels=None, model_labels={}, 
     style_algs={}, ax=[None, None, None], params=["lam"], subset_time=None, legend=True):
-    """ Visualize
+    """ Visualize online learning losses, weights, and parameters.
 
     Args:
         history (History): online learning History object
+        regret_periods (list[tuple]): list of tuples specifying the start (inclusive) and end
+            points (not inclusive) of regret periods
+        time_labels (list): list of labels for the time periods
+        model_labels (dict): dictionary of model labels
+        style_algs (dict): dictionary of model styles
+        ax (list[ax]): list of axis objects for plotting the weights, regret, and parameter
+            plots respectively.
+        params (list[str]): list of parameters to plot
+        subset_time (tuple): plot values from times[subset_time[0]:subset_time[1]]
+        legend (bool): if True, plot legend.
     """
     times = history.get_times()
     if time_labels is None:
@@ -242,4 +255,3 @@ def plot_time_seperators(regret_periods, index, ax):
             raise ValueError("Bad time seperator", start, end)
         end_time = index[end]
         ax.axvline(x=start_time, c='k', linestyle='-.', linewidth=1.0)
-        # ax.axvline(x=end_time, c='k', linestyle='-.', linewidth=1.0)
