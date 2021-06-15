@@ -64,6 +64,7 @@ class History(object):
 
             if not self.low_memory:
                 self.loss_history[t_fb] = copy.deepcopy(loss_fb)
+
             self.grad_history[t_fb] = loss_fb['grad'](w=self.play_history[t_fb])
             self.realized_losses[t_fb] = loss_fb['fun'](w=self.play_history[t_fb])
 

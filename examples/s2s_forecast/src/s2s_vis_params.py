@@ -1,3 +1,7 @@
+""" Visualization parameters (algorithm names, 
+task names, etc.) for Flaspohler et al., 
+Online Learning with Optimism and Delay, ICML 2021.
+"""
 import matplotlib.cm as cm
 
 alg_naming = {

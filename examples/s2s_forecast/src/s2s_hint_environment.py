@@ -1,3 +1,13 @@
+""" Subseasonal forecasting hinter class and losses.
+
+Implements a subseasonal forecasting hint environment.
+Provides loss objects for optimistic hinters.
+
+Example usage:
+    # Set up hint environment (manages losses and ground truth for hinter) 
+    s2s_hint_env = S2SHintEnvironment(
+        dates, hint_models, gt_id=gt_id, horizon=horizon, learner=learner)
+"""
 # General imports
 import pandas as pd
 import numpy as np
@@ -12,9 +22,6 @@ from poold.environment import Environment
 from src.utils.models_util import get_forecast_filename
 from src.utils.general_util import tic, toc, printf
 from src.utils.experiments_util import get_measurement_variable, get_ground_truth, get_start_delta
-
-# TODO: remove this import
-import pdb
 
 class S2SHintEnvironment(Environment):
     """ S2S hint data class for online learning """ 

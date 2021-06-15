@@ -1,3 +1,15 @@
+""" Run optimistic learner with delay.
+
+Example usage:
+    python run_learner_and_hinter.py contest_precip 56w --alg dormplus --hint recent_g --re 1
+    Runs DORM+ with recent_g hinting and 1 replicate
+
+    python run_learner_and_hinter.py contest_precip 56w --alg dormplus --hint recent_g --re 4
+    Runs DORM+ with recent_g hinting and 4 replicates
+
+    python run_learner_and_hinter.py contest_precip 56w --alg adahedged --hint_alg dormplus --re 1 --visualize True
+    Runs AdaHedgeD with DORM+ hint learning and 1 replicate
+"""
 # System imports
 import numpy as np
 from functools import partial
@@ -23,7 +35,7 @@ from poold.utils import visualize
 from poold.learners import ReplicatedOnlineLearner 
 
 # Set print parameters
-np.set_printoptions(precision=3)
+np.set_printoptions(precision=6)
 
 # Parse command-line arguments
 parser = ArgumentParser()
@@ -54,7 +66,7 @@ alg = args.alg # algorithm
 hint_alg = args.hint_alg # algorithm 
 hint_type = args.hint # type of optimistic hint
 reps = int(args.replicates) # number of replicated experts
-visualize = args.visualize
+vis = bool(args.visualize)
 
 # Perpare experts, sort model names, and get selected submodel for each
 models = model_string.split(',')
@@ -67,7 +79,7 @@ hint_options.sort()
 # Subseasonal forecasting hinter
 learn_to_hint = (hint_alg != "None")
 if learn_to_hint:
-    hint_options = ["None", "prev_g", "mean_g", "avg_prev_g"]
+    hint_options = ["None", "recent_g", "mean_g", "prev_g"]
     hint_options.sort()
 hz_hints = False
 regret_hints = False if alg == "adahedged" else True
@@ -81,12 +93,14 @@ else:
     exp_string = f"{gt_id}_{horizon}_{date_str}_R{reps}_A{alg}_HL{hint_alg if learn_to_hint else ('-').join(hint_options)}"
 
 save_file = f"experiments/learner_history_{exp_string}.pickle"
+
+# If experiment has already been run, exit
 if os.path.exists(save_file):
     exit(0)
 
 # Forecast targets
 targets = get_target_dates(date_str=date_str, horizon=horizon) # forecast target dates
-targets_pred = copy.deepcopy(targets) # targets we successfully make forecasts for 
+targets_missed = [] # targets we do not make predictions for
 period_length = 26 # yearly regret periods/resetting
 
 start_delta = timedelta(days=get_start_delta(horizon, gt_id)) # difference between issuance + target
@@ -97,36 +111,31 @@ T = len(dates) # algorithm duration
 learner = create(alg, model_list=models, groups=None, T=period_length)
 if reps > 1:
     learner = ReplicatedOnlineLearner(learner, replicates=reps)
-regret_periods = []
 
 # Subseasonal forecasting environment
 s2s_env = S2SEnvironment(dates, models, gt_id=gt_id, horizon=horizon)
 
-# Get name and parition for each of the hints
+# Get name and grouping for each of the hints
 if hz_hints:
+    # Set up horizon-dependent hinters
     horizon_hints = {"1day": ["prev_y"], 
-                    "12w": ["mean_g", "prev_g", "trend_y"],
-                    "34w": ["mean_g", "prev_g", "trend_y"],
-                    "future": ["mean_g", "prev_g", "trend_y"],
-                    "default":["prev_g"]}  
-    n_hints = [sum(len(x) for x in horizon_hints)]
+                    "12w": ["mean_g", "recent_g", "trend_y"],
+                    "34w": ["mean_g", "recent_g", "trend_y"],
+                    "future": ["mean_g", "recent_g", "trend_y"],
+                    "default":["recent_g"]}  
     hint_models = ["h" + str(i) + "_" + "".join(item) \
         for i, sublist in enumerate(horizon_hints.values()) \
             for item in sublist]
-    hint_groups = [i for i, sublist in enumerate(horizon_hints.values()) \
-        for item in sublist]
 else:
+    # Set up fixed hinting options for all horizons
     horizon_hints = {"default": hint_options}  
-    n_hints = [sum(len(x) for x in horizon_hints)]
     hint_models = ["h_" + "".join(item) \
         for i, item in enumerate(horizon_hints["default"])]
-    hint_groups = [0 for i, sublist in enumerate(horizon_hints["default"])]
 
 # Set up hinter (produces hints for delay period)
-s2s_hinter = S2SHinter(
-    hint_types=horizon_hints, gt_id=gt_id, horizon=horizon, learner=learner, 
-    environment=s2s_env, hint_groups=hint_groups, regret_hints=regret_hints, 
-    hz_hints=hz_hints)
+s2s_hinter = S2SHinter(hint_types=horizon_hints, gt_id=gt_id, \
+    horizon=horizon, learner=learner, environment=s2s_env, \
+    regret_hints=regret_hints, hz_hints=hz_hints)
 if reps > 1:
     s2s_hinter = ReplicatedS2SHinter(s2s_hinter, replicates=reps)
 
@@ -140,6 +149,7 @@ if learn_to_hint:
     if reps > 1:
         hint_learner = ReplicatedOnlineLearner(hint_learner, replicates=reps)
 
+regret_periods = [] # start and end of 
 t_pred = 0 # number of successful predictions made
 period_start = 0 # start of regret period
 
@@ -169,7 +179,7 @@ for t in range(T):
     pred = s2s_env.check_pred(t)
     if pred is False:
         print(f"Missing expert predictions for round {t}.")
-        del targets_pred[t]
+        targets_missed.append(t)
         learner.increment_time() # increment learner as well
         if learn_to_hint:
             hint_learner.increment_time() # increment learner as well
@@ -217,6 +227,9 @@ for t in range(T):
 
 # Update the final regret period
 regret_periods.append((period_start, t_pred))
+targets_pred = copy.deepcopy(targets)
+for index in sorted(targets_missed, reverse=True):
+    del targets_pred[index]
 
 # Get the remainder of the losses
 losses_fb = s2s_env.get_losses(
@@ -228,7 +241,8 @@ learner.history.record_losses(losses_fb)
 fl = open(f"experiments/learner_history_{exp_string}.pickle", "wb")
 pickle.dump([targets_pred, regret_periods, model_alias, learner.history], fl)
 
-if visualize:
+# Visualize learner and hinter
+if vis:
     visualize(learner.history, regret_periods, targets_pred, model_alias, style_algs)
 
 if learn_to_hint:
@@ -239,8 +253,8 @@ if learn_to_hint:
     pickle.dump([targets_pred, regret_periods, {}, hint_learner.history], fh)
 
     # Visualize history
-    if visualize:
+    if vis:
         visualize(hint_learner.history, regret_periods, targets_pred)
 
-if visualize:
+if vis:
     plt.show()

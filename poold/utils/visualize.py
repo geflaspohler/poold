@@ -107,12 +107,9 @@ def visualize(history, regret_periods=None, time_labels=None, model_labels={},
         df_params = None
 
     for t, time in enumerate(times):
-        try:
-            loss_obj, loss_learner, loss_grad  = history.get_loss(time)
-        except:
-            pdb.set_trace()
-            loss_obj, loss_learner, loss_grad  = history.get_loss(time)
+        loss_obj, loss_learner, loss_grad  = history.get_loss(time)
         play_learner = history.get_play(time, return_past=False)
+        loss_learner = loss_obj['fun'](w=play_learner)
         params_learner = history.get_params(time)
 
         loss_all = loss_obj.get('exp', {})

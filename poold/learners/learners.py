@@ -605,6 +605,7 @@ class DORMPlus(OnlineLearner):
 
         print("g", g_fb)
         print("r", regret_fb)
+        # pdb.set_trace()
         # Update psuedo-play 
         self.p = np.maximum(0, self.p + regret_fb + hint - self.hint_prev)
 
@@ -625,6 +626,8 @@ class ReplicatedOnlineLearner(object):
         self.base_learner = copy.deepcopy(learner) 
         self.learner_queue = [copy.deepcopy(learner) for i in range(replicates)]
         self.t = 0 # current algorithm time
+        self.c = 0 # current learner count
+        self.t_to_c = {0: 0} # time to learner count mapping
         self.d = self.base_learner.d
         self.groups = self.base_learner.groups
         self.reps = replicates
@@ -635,7 +638,7 @@ class ReplicatedOnlineLearner(object):
 
     def get_params(self, t):
         """ Returns current algorithm hyperparmeters as a dictionary. """
-        return self.learner_queue[t % self.reps].get_params()
+        return self.learner_queue[self.t_to_c[t] % self.reps].get_params()
 
     def update_and_play(self, losses_fb, hint):
         """ Update online learner and generate a new play.
@@ -658,10 +661,10 @@ class ReplicatedOnlineLearner(object):
         # Update the history with received losses
         self.history.record_losses(losses_fb)
 
-        w = self.learner_queue[self.t % self.reps].update_and_play(losses_fb, hint)
+        w = self.learner_queue[self.c % self.reps].update_and_play(losses_fb, hint)
 
         # Get algorithm parameters
-        params = self.learner_queue[self.t % self.reps].get_params()
+        params = self.learner_queue[self.c % self.reps].get_params()
 
         # Update play history 
         self.history.record_play(self.t, w)
@@ -669,15 +672,19 @@ class ReplicatedOnlineLearner(object):
 
         # Increment time for the rest of the learners 
         for i, learner in enumerate(self.learner_queue):
-            if i != self.t % self.reps:
+            if i != self.c % self.reps:
                 learner.t += 1
+
+        # Log and update counters
         self.t += 1
+        self.c += 1
+        self.t_to_c[self.t] = self.c
         # Update algorithm iteration 
         return w
 
     def log_params(self, t):
         """ Return dictionary of algorithm parameters """
-        learner = self.learner_queue[t % self.reps]
+        learner = self.learner_queue[self.t_to_c[t] % self.reps]
         params = learner.get_params()
         params['t'] = t
         # Log model weights
@@ -697,21 +704,23 @@ class ReplicatedOnlineLearner(object):
     def increment_time(self):
         """ Increment learner time """
         self.t += 1
+        self.t_to_c[self.t] = self.c
         for i in range(self.reps):
             self.learner_queue[i].increment_time()
 
     def record_losses(self, losses_fb):
         """ Record losses """
         self.history.record_losses(losses_fb)
-        self.learner_queue[self.t % self.reps].record_losses(losses_fb)
+        for t_fb, loss_fb in losses_fb:
+            self.learner_queue[self.t_to_c[t_fb] % self.reps].record_losses([(t_fb, loss_fb)])
 
     def get_play(self, t):
         """ Get play"""
-        return self.learner_queue[self.t % self.reps].get_play(t)
+        return self.learner_queue[self.t_to_c[t] % self.reps].get_play(t)
 
     def get_grad(self, t):
         """ Get grad """
-        return self.learner_queue[self.t % self.reps].get_grad(t)
+        return self.learner_queue[self.t_to_c[t] % self.reps].get_grad(t)
 
     def get_outstanding(self, include=True, all_learners=False):
         """ Gets outstanding predictions at time self.t
@@ -721,7 +730,7 @@ class ReplicatedOnlineLearner(object):
                 t in oustanding set
         """
         # Add t to oustanding if not already present
-        learner = self.learner_queue[self.t % self.reps]
+        learner = self.learner_queue[self.c % self.reps]
         if include: 
             learner.outstanding.add(self.t)
 

@@ -1,10 +1,21 @@
+"""
+Generate visualization figures and metrics for 
+Flaspohler et al. Online Learning with Optimism and Delay, 
+ICML 2021. 
 
+Usage example:
+    python icml_visualizations.py dormplus prev_g hinting --final_year
+
+This will plot final year weights and regret for the 
+hinting experiments using dormplus base algorithm.
+"""
 import pickle
 import matplotlib.pyplot as plt
 import copy
 import os
 from itertools import product
 import pandas as pd
+from argparse import ArgumentParser
 
 # S2S imports
 from src.s2s_vis_params import model_alias, alg_naming, style_algs, task_dict
@@ -14,15 +25,19 @@ from poold import create
 from poold.utils import loss_regret
 from poold.utils import visualize, visualize_multiple
 
-task_dict = {
-    "contest_precip_34w": "Precip. 3-4w",
-    "contest_precip_56w": "Precip. 5-6w",    
-    "contest_tmp2m_34w": "Temp. 3-4w",
-    "contest_tmp2m_56w": "Temp. 5-6w"
-}
+# Parse command-line arguments
+parser = ArgumentParser()
+parser.add_argument("pos_vars", nargs="*")  # alg, hint, experiment
+parser.add_argument('--final_year', '-fy', action='store_true')
+args, opt = parser.parse_known_args()
+
+alg = args.pos_vars[0] 
+hint = args.pos_vars[1] 
+experiment = args.pos_vars[2] 
+final_year = args.final_year
 
 def display_table(data_dict, model_list, model_alias={}, task_dict={}, filename="temp"):
-    """Displays dataframe after sorting """
+    """Displays and saves dataframe after sorting """
     only_learner = False
     df = pd.DataFrame.from_dict(data_dict)
     df = df.rename(task_dict, axis=1)
@@ -41,13 +56,17 @@ def display_table(data_dict, model_list, model_alias={}, task_dict={}, filename=
 
     df = df.reindex(tasks) # Sort tasks; might not be stable as a dict
 
-    fname = f"./eval/all_task_losses_{filename}.tex"
+    if not os.path.exists('./eval'):
+        os.mkdir('eval')
+    fname = f"eval/all_task_losses_{filename}.tex"
     df.to_latex(fname, float_format="%.3f", longtable=False, column_format=align)
     return df
 
-experiments_home = "./experiments"
-experiment = "rep"
-hint = "prev_g"
+# Experiments home directory 
+experiments_home = "experiments"
+if not os.path.exists(experiments_home):
+    oi.mkdir(experiments_home)
+
 all_task_tables = {}
 for gt_id, horizon in product(
         ["contest_tmp2m","contest_precip"], ["34w", "56w"]):
@@ -59,15 +78,14 @@ for gt_id, horizon in product(
         f"learner_history_{task}_std_contest_eval_Adormplus_HL{hint}.pickle",
         f"learner_history_{task}_std_contest_eval_Adorm_HL{hint}.pickle",
         f"learner_history_{task}_std_contest_eval_Aadahedged_HL{hint}.pickle",
-        # f"learner_history_{task}_std_contest_eval_Adub_HL{hint}.pickle",
         ]
     elif experiment == "hinting":
         learner_list = [
-        f"learner_history_{task}_std_contest_eval_Adormplus_HLavg_prev_g.pickle",
-        f"learner_history_{task}_std_contest_eval_Adormplus_HLprev_g.pickle",
-        f"learner_history_{task}_std_contest_eval_Adormplus_HLmean_g.pickle",
-        f"learner_history_{task}_std_contest_eval_Adormplus_HLNone.pickle",
-        f"learner_history_{task}_std_contest_eval_Adormplus_HLdormplus.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HLavg_recent_g.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HLrecent_g.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HLmean_g.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HLNone.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HLdormplus.pickle",
         ]
     elif experiment == "regularization":
         learner_list = [
@@ -78,17 +96,17 @@ for gt_id, horizon in product(
     elif experiment == "rep":
         rep = 3 if horizon == "34w" else 4
         learner_list = [
-        f"learner_history_{task}_std_contest_eval_Adormplus_HL{hint}.pickle",
-        f"learner_history_{task}_std_contest_eval_R{rep}_Adormplus_HL{hint}.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HL{hint}.pickle",
+        f"learner_history_{task}_std_contest_eval_R{rep}_A{alg}_HL{hint}.pickle",
         ]
     elif experiment == "multiple":
         learner_list = [
-        f"learner_history_{task}_std_contest_eval_Adormplus_HLNone.pickle",
-        f"learner_history_{task}_std_contest_eval_Adormplus_HLprev_g_past.pickle",
-        f"learner_history_{task}_std_contest_eval_Adormplus_HLprev_g_future.pickle",
-        f"learner_history_{task}_std_contest_eval_Adormplus_HLprev_g.pickle",
-        f"learner_history_{task}_std_contest_eval_Adormplus_HLprev_g_double.pickle",
-        f"learner_history_{task}_std_contest_eval_Adormplus_HLprev_g_triple.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HLNone.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HLrecent_g_past.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HLrecent_g_future.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HLrecent_g.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HLrecent_g_double.pickle",
+        f"learner_history_{task}_std_contest_eval_A{alg}_HLrecent_g_triple.pickle",
         ]
 
     experiment_list = []
@@ -99,11 +117,12 @@ for gt_id, horizon in product(
         models["online_learner"] = alias["online_learner"]
         if experiment == "hinting":
             # Rename the learner to it's hint type
-            if "avg_prev_g" in f:
+            if ":w
+            " in f:
                 models["online_learner"] = "prev_g"
             elif "mean_g" in f:
                 models["online_learner"] = "mean_g"
-            elif "prev_g" in f:
+            elif "recent_g in f:
                 models["online_learner"] = "recent_g"
             elif "None" in f:
                 models["online_learner"] = "none"
@@ -123,40 +142,34 @@ for gt_id, horizon in product(
                 models["online_learner"] = "2D+1"
             elif "triple" in f:
                 models["online_learner"] = "3D+1"
-            elif "prev_g" in f:
+            elif "recent_g" in f:
                 models["online_learner"] = "D+1"
 
         experiment_list.append((targets, regret_periods, models, history))
 
-    if experiment == "zoo" and hint != "prev_g":
-        filename = f"{experiment}_{hint}_{task}"
+    filename = f"{experiment}_{hint}_{alg}_{task}"
+    if final_year:
+        subset_time = (-26, None)
     else:
-        filename = f"{experiment}_{task}"
+        subset_time = None
+    all_task_tables[task] = visualize_multiple(experiment_list, style_algs, subset_time=subset_time, filename=filename)
 
-    all_task_tables[task] = visualize_multiple(experiment_list, style_algs, filename=filename)
-    # all_task_tables[task] = visualize_multiple(experiment_list, style_algs, subset_time=(-26, None), filename=filename)
-
-if experiment == "zoo" and hint != "prev_g":
-   tablename = f"{experiment}_{hint}"
-else:
-    tablename = f"{experiment}"
+tablename = f"{experiment}_{hint}_{alg}"
 df = display_table(all_task_tables, experiment_list[0][3].models, experiment_list[0][2], task_dict, filename=tablename)
 print(df)
 
 if experiment == "multiple":
-    hinters = ["0", "1", "D", "D+1", "2D+1", "3D+1"]
+    hinters = ["0", "D", "1", "D+1", "2D+1", "3D+1"]
     fig, axs = plt.subplots(1,4, figsize=(25,5), sharey=False)
 
     lines_precip = []
     for i, task in enumerate(df.index):
-        df.loc[task, hinters].plot(ax=axs[i], label=task, color='b', linewidth=2)
-        axs[i].set_xticks(range(6))
-        axs[i].set_xticklabels(["0", "1", "D", "D+1", "2D+1", "3D+1"])
+        axs[i].scatter(["none", "past", "future", "past+\nfuture", "2D+1", "3D+1"], df.loc[task, hinters], s=100)
         axs[i].set_title(task)
-        axs[i].set_xlabel("recent\_g Multiplier $c$", fontsize=15)
         if i == 0:
-            axs[i].set_ylabel(f"Average RMSE", fontsize=15)  
-
+            axs[i].set_ylabel(f"Average RMSE", fontsize=25)  
 
     # Save figure to file 
-    plt.savefig("figs/multiple.pdf",bbox_inches='tight')
+    if not os.path.exists('figs'):
+        os.mkdir('figs')
+    plt.savefig(f"figs/multiple_{hint}_{alg}.pdf", bbox_inches='tight')

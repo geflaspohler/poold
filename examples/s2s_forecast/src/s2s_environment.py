@@ -1,3 +1,15 @@
+""" Subseasonal forecasting environment class and losses.
+
+Implements a subseasonal forecasting environment interface.
+Provides forecast loss objects.
+
+Example usage:
+    # Subseasonal forecasting environment
+    targets = get_target_dates(date_str=date_str, horizon=horizon) # forecast target dates
+    start_delta = timedelta(days=get_start_delta(horizon, gt_id)) # difference between issuance + target
+    dates = [t - start_delta for t in targets] # forecast issuance dates
+    s2s_env = S2SEnvironment(dates, models, gt_id=gt_id, horizon=horizon)
+"""
 # General imports
 import pandas as pd
 import numpy as np
@@ -12,9 +24,6 @@ from poold.environment import Environment
 from src.utils.models_util import get_forecast_filename
 from src.utils.general_util import tic, toc, printf
 from src.utils.experiments_util import get_measurement_variable, get_ground_truth, get_start_delta
-
-# TODO: remove this import
-import pdb
 
 class S2SEnvironment(Environment):
     """ S2S data class for online learning """ 
@@ -186,7 +195,6 @@ class S2SEnvironment(Environment):
             if pres == False:
                 missing_list.append(model)
         
-        print(f"Missing models {missing_list}")
         if len(missing_list) > 0:
             return False
         return True
