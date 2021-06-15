@@ -114,7 +114,6 @@ class OnlineLearner(ABC):
                 }
                 for the hint pseudoloss at time self.t 
         """
-        # pdb.set_trace()
         # Add to set missing feedback
         self.outstanding.add(self.t)
 
@@ -603,9 +602,6 @@ class DORMPlus(OnlineLearner):
         g_fb = fb["g"]
         regret_fb = loss_regret(g_fb, w_fb, self.groups) # compute regret w.r.t. groups 
 
-        print("g", g_fb)
-        print("r", regret_fb)
-        # pdb.set_trace()
         # Update psuedo-play 
         self.p = np.maximum(0, self.p + regret_fb + hint - self.hint_prev)
 

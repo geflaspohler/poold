@@ -27,8 +27,6 @@ import seaborn as sns
 sns.set(font_scale=1.6)
 sns.set_style("white")
 
-import pdb
-
 def visualize_multiple(experiment_list, style_algs, subset_time=None, filename="temp"):
     num_plots = len(experiment_list)
     fig_r, ax_r = plt.subplots(1, 1, figsize=(10, 4), sharex=False)
@@ -122,7 +120,8 @@ def visualize(history, regret_periods=None, time_labels=None, model_labels={},
             df_params.iloc[t] = params_learner
 
     plot_weights(df_weights, regret_periods, model_labels, style_algs, ax[0], legend, subset_time)
-    plot_regret(df_losses, regret_periods, model_labels, style_algs, history.models, ax[1], only_learner=True, subset_time=subset_time)
+    if not df_losses[history.models].isna().all(axis=None):
+        plot_regret(df_losses, regret_periods, model_labels, style_algs, history.models, ax[1], only_learner=True, subset_time=subset_time)
     if df_params is not None:
         plot_params(df_params, regret_periods, model_labels["online_learner"], style_algs, ax[2], subset_time=subset_time)
 
@@ -237,10 +236,10 @@ def plot_time_seperators(regret_periods, index, ax):
     ''' Local utiliy function for plotting vertical time seperators '''
     for start, end in regret_periods:
         start_time = index[start]
-        if end > len(index):
-            pdb.set_trace()
         if end == len(index):
             end -= 1
+        elif end > len(index):
+            raise ValueError("Bad time seperator", start, end)
         end_time = index[end]
         ax.axvline(x=start_time, c='k', linestyle='-.', linewidth=1.0)
         # ax.axvline(x=end_time, c='k', linestyle='-.', linewidth=1.0)

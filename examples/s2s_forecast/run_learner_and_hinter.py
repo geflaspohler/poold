@@ -24,9 +24,9 @@ import os
 from src.s2s_environment import S2SEnvironment 
 from src.s2s_hints import S2SHinter, ReplicatedS2SHinter
 from src.s2s_hint_environment import S2SHintEnvironment
+from src.s2s_vis_params import model_alias, alg_naming, style_algs
 from src.utils.eval_util import get_target_dates
 from src.utils.experiments_util import get_start_delta
-from src.s2s_vis_params import model_alias, alg_naming, style_algs
 
 # PoolD imports
 from poold import create
@@ -126,11 +126,14 @@ if hz_hints:
     hint_models = ["h" + str(i) + "_" + "".join(item) \
         for i, sublist in enumerate(horizon_hints.values()) \
             for item in sublist]
+    hint_groups = [i for i, sublist in enumerate(horizon_hints.values()) \
+        for item in sublist]
 else:
     # Set up fixed hinting options for all horizons
     horizon_hints = {"default": hint_options}  
     hint_models = ["h_" + "".join(item) \
         for i, item in enumerate(horizon_hints["default"])]
+    hint_groups = [0 for i, sublist in enumerate(horizon_hints["default"])]
 
 # Set up hinter (produces hints for delay period)
 s2s_hinter = S2SHinter(hint_types=horizon_hints, gt_id=gt_id, \
@@ -156,6 +159,7 @@ period_start = 0 # start of regret period
 # Iterate through algorithm times
 for t in range(T):
     print(" >>> Starting round", t)
+    # Check for end of regret period 
     if t % period_length == 0 and t != 0:
         # Get the remainder of the losses
         losses_fb = s2s_env.get_losses(
@@ -171,7 +175,7 @@ for t in range(T):
             hint_learner.history.record_losses(hint_losses_fb)
             hint_learner.reset_params(T=period_length)
 
-        # Record that start of a new regret period
+        # Record the start of a new regret period
         regret_periods.append((period_start, t_pred))
         period_start = t_pred
 
@@ -254,7 +258,7 @@ if learn_to_hint:
 
     # Visualize history
     if vis:
-        visualize(hint_learner.history, regret_periods, targets_pred)
+        visualize(hint_learner.history, regret_periods, targets_pred, model_alias, style_algs)
 
 if vis:
     plt.show()

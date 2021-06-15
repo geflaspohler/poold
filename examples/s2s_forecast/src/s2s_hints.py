@@ -7,7 +7,7 @@ Example usage:
     # Set up hinter (produces hints for delay period)
     s2s_hinter = S2SHinter(
         hint_types=horizon_hints, gt_id=gt_id, horizon=horizon, learner=learner, 
-        environment=s2s_env, hint_groups=hint_groups, regret_hints=regret_hints, 
+        environment=s2s_env, regret_hints=regret_hints, 
         hz_hints=hz_hints)
     if replicates > 1:
         s2s_hinter = ReplicatedS2SHinter(s2s_hinter, replicates=reps)
