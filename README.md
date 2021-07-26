@@ -4,13 +4,21 @@ PoolD
 This Python package implements algorithms for online learning under delay using optimistic hints. More details on the algorithms and their regret properties can be found in the manuscript [Online Learning with Optimism and Delay](https://arxiv.org/abs/2106.06885).
 
 ```
-@InProceedings{flaspohler2021online,
-      title={Online Learning with Optimism and Delay}, 
-      author={Genevieve Flaspohler and Francesco Orabona and Judah Cohen and Soukayna Mouatadid and Miruna Oprescu and Paulo Orenstein and Lester Mackey},
-      booktitle={Proceedings of the 38th International Conference on Machine Learning},
-      year={2021},
-      series={Proceedings of Machine Learning Research},
-      publisher={PMLR}
+
+@InProceedings{pmlr-v139-flaspohler21a,
+  title = 	 {Online Learning with Optimism and Delay},
+  author =       {Flaspohler, Genevieve E and Orabona, Francesco and Cohen, Judah and Mouatadid, Soukayna and Oprescu, Miruna and Orenstein, Paulo and Mackey, Lester},
+  booktitle = 	 {Proceedings of the 38th International Conference on Machine Learning},
+  pages = 	 {3363--3373},
+  year = 	 {2021},
+  editor = 	 {Meila, Marina and Zhang, Tong},
+  volume = 	 {139},
+  series = 	 {Proceedings of Machine Learning Research},
+  month = 	 {18--24 Jul},
+  publisher =    {PMLR},
+  pdf = 	 {http://proceedings.mlr.press/v139/flaspohler21a/flaspohler21a.pdf},
+  url = 	 {http://proceedings.mlr.press/v139/flaspohler21a.html},
+  abstract = 	 {Inspired by the demands of real-time climate and weather forecasting, we develop optimistic online learning algorithms that require no parameter tuning and have optimal regret guarantees under delayed feedback. Our algorithms—DORM, DORM+, and AdaHedgeD—arise from a novel reduction of delayed online learning to optimistic online learning that reveals how optimistic hints can mitigate the regret penalty caused by delay. We pair this delay-as-optimism perspective with a new analysis of optimistic learning that exposes its robustness to hinting errors and a new meta-algorithm for learning effective hinting strategies in the presence of delay. We conclude by benchmarking our algorithms on four subseasonal climate forecasting tasks, demonstrating low regret relative to state-of-the-art forecasting models.}
 }
 ```
 The core of the library is the learners module. Learners can be instantiated using the `create` method:
