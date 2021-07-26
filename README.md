@@ -74,7 +74,7 @@ Project Organization
 --------
 
 ## Install  
-The PoolD pacakge can be installed via pip[https://pypi.org/project/poold/]:
+The PoolD pacakge can be installed [via pip](https://pypi.org/project/poold/):
 ```
 pip install poold
 ```
