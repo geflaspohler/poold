@@ -73,7 +73,12 @@ Project Organization
     └── setup.py           <- makes project pip installable (pip install -e .) so poold can be imported
 --------
 
-## Install project requriements 
+## Install  
+The PoolD pacakge can be installed via pip[https://pypi.org/project/poold/]:
+```
+pip install poold
+```
+
 Project requirements are managed by pipenv. 
 ```
 pipenv install # to install the dependencies from the Pipfile
